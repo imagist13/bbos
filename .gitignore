@@ -1,0 +1,110 @@
+# =============================================
+# BBOS - Buckyball Operating System
+# =============================================
+
+# =============================================
+# Editor & IDE
+# =============================================
+# VS Code
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# JetBrains
+.idea/
+*.iml
+
+# Sublime
+*.sublime-*
+
+# Vim
+.*.swp
+.*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Cursor/Claude
+.claude/
+.cursor/
+
+# =============================================
+# Node.js
+# =============================================
+node_modules/
+*.local
+
+# Build outputs
+dist/
+dist-ssr/
+build/
+*.egg-info/
+
+# Package managers
+bun.lockb
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# =============================================
+# Tauri / Rust
+# =============================================
+src-tauri/target/
+src-tauri/Cargo.lock
+src-tauri/*.pdb
+src-tauri/.cargo/
+
+# Rust build artifacts
+*.rlib
+*.rmeta
+*.so
+*.dylib
+*.exe
+
+# =============================================
+# Logs
+# =============================================
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# =============================================
+# Environment & Secrets
+# =============================================
+.env
+.env.local
+.env.*.local
+.env.production
+*.pem
+*.key
+
+# =============================================
+# Testing & Coverage
+# =============================================
+coverage/
+.nyc_output/
+*.lcov
+
+# =============================================
+# Temporary Files
+# =============================================
+*.tmp
+*.temp
+*.bak
+*.orig
+*.swp
+
+# OS generated
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
