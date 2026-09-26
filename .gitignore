@@ -59,7 +59,9 @@ src-tauri/Cargo.lock
 src-tauri/*.pdb
 src-tauri/.cargo/
 
-# Rust build artifacts
+# Rust build artifacts (any Cargo workspace)
+**/target/
+**/*.pdb
 *.rlib
 *.rmeta
 *.so
@@ -99,6 +101,9 @@ coverage/
 *.bak
 *.orig
 *.swp
+
+# Vendored demo / example trees under design (do not commit)
+design/frontend/demo/
 
 # OS generated
 .DS_Store
