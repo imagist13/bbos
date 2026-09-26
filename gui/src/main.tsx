@@ -1,12 +1,12 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 
-import { Welcome } from "@/pages/Welcome";
+import { Home } from "@/pages/Home";
 
 import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <Welcome />
+    <Home />
   </React.StrictMode>,
 );

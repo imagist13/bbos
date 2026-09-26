@@ -1,0 +1,1994 @@
+// Buckyball Studio - Codex Style with i18n
+const { useState, useEffect, useRef, useCallback, createContext, useContext } = React;
+
+// ============================================
+// i18n - Translations
+// ============================================
+const translations = {
+  zh: {
+    // App
+    appName: 'Buckyball Studio',
+    webPreview: '网页预览',
+    nixRequired: 'Nix 环境未安装，部分功能不可用',
+    settings: '设置',
+    
+    // Sidebar
+    workspace: '工作区',
+    searchFiles: '搜索文件...',
+    new: '新建',
+    import: '导入',
+    
+    // Tabs
+    chip: '芯片',
+    designs: '设计',
+    ballIsa: 'Ball ISA',
+    simulator: '仿真器',
+    agent: 'Agent',
+    
+    // Agent Chat
+    agentChat: 'Agent 对话',
+    selectAgent: '选择 Agent',
+    sendMessage: '发送消息...',
+    send: '发送',
+    thinking: '思考中...',
+    copyCode: '复制代码',
+    copied: '已复制!',
+    clearChat: '清空对话',
+    welcome: '欢迎使用 Agent 对话',
+    welcomeDesc: '选择一个 Agent 开始对话。Agent 可以帮助你生成代码、调试程序等。',
+    codex: 'Codex',
+    claude: 'Claude',
+    gemini: 'Gemini',
+    chatgpt: 'ChatGPT',
+    
+    // Agent Assistant
+    agentAssistant: 'AI 助手',
+    agentWelcome: '问我任何关于芯片配置、设计、仿真的问题',
+    quickActions: '快捷操作',
+    
+    // Chip Editor
+    chipConfig: '芯片配置',
+    chipFile: 'chip.toml',
+    config: '配置',
+    designs_section: '设计',
+    simulations: '仿真',
+    uvm: 'UVM',
+    designInclude: '设计包含',
+    designFilePath: '设计文件路径',
+    simulationTargets: '仿真目标',
+    uvmConfig: 'UVM 配置',
+    balls: 'Balls',
+    ips: 'IPs',
+    save: '保存',
+    saved: '已保存',
+    
+    // Design Editor
+    designConfig: '设计配置',
+    tileCoreLayout: 'Tile 和 Core 布局',
+    topConfig: '顶层配置',
+    numTiles: 'Tile 数量',
+    tiles: 'Tiles',
+    addTile: '添加 Tile',
+    tile: 'Tile',
+    id: 'ID',
+    active: '活跃',
+    coreDataBytes: '核心数据 (B)',
+    xlen: 'XLEN',
+    vaddrBits: '虚拟地址位宽',
+    paddrBits: '物理地址位宽',
+    include: '包含',
+    
+    // Ball ISA
+    ballIsaEditor: 'Ball ISA 编辑器',
+    instructions: '指令',
+    addInstruction: '添加指令',
+    searchInstructions: '搜索指令...',
+    allBalls: '所有 Balls',
+    mnemonic: '助记符',
+    funct7: 'funct7',
+    ballId: 'Ball ID',
+    ball: 'Ball',
+    actions: '操作',
+    edit: '编辑',
+    
+    // Simulator
+    simControl: '仿真控制',
+    ready: '准备就绪',
+    running: '运行中',
+    selectChip: '芯片',
+    selectSimulator: '仿真器',
+    selectBinary: '二进制文件',
+    run: '运行',
+    stop: '停止',
+    quickCommands: '快捷命令',
+    terminalOutput: '终端输出',
+    clear: '清空',
+    exitCode: '退出码',
+    waveformSaved: '波形已保存',
+    selectBinaryFirst: '请先选择二进制文件...',
+    readyToSimulate: '准备开始仿真...\n选择芯片、仿真器和二进制文件后开始。',
+    simStopped: '>>> 仿真被用户停止',
+  },
+  en: {
+    // App
+    appName: 'Buckyball Studio',
+    webPreview: 'Web Preview',
+    nixRequired: 'Nix required for full functionality',
+    settings: 'Settings',
+    
+    // Sidebar
+    workspace: 'Workspace',
+    searchFiles: 'Search files...',
+    new: 'New',
+    import: 'Import',
+    
+    // Tabs
+    chip: 'Chip',
+    designs: 'Designs',
+    ballIsa: 'Ball ISA',
+    simulator: 'Simulator',
+    agent: 'Agent',
+    
+    // Agent Assistant
+    agentAssistant: 'AI Assistant',
+    agentWelcome: 'Ask me anything about chip config, design, or simulation',
+    quickActions: 'Quick Actions',
+    
+    // Chip Editor
+    chipConfig: 'Chip Configuration',
+    chipFile: 'chip.toml',
+    config: 'Configuration',
+    designs_section: 'Designs',
+    simulations: 'Simulations',
+    uvm: 'UVM',
+    designInclude: 'Design Include',
+    designFilePath: 'Design File Path',
+    simulationTargets: 'Simulation Targets',
+    uvmConfig: 'UVM Configuration',
+    balls: 'Balls',
+    ips: 'IPs',
+    save: 'Save',
+    saved: 'Saved',
+    
+    // Design Editor
+    designConfig: 'Design Configuration',
+    tileCoreLayout: 'Tile and Core Layout',
+    topConfig: 'Top Configuration',
+    numTiles: 'Number of Tiles',
+    tiles: 'Tiles',
+    addTile: 'Add Tile',
+    tile: 'Tile',
+    id: 'ID',
+    active: 'Active',
+    coreDataBytes: 'Core Data (B)',
+    xlen: 'XLEN',
+    vaddrBits: 'VAddr Bits',
+    paddrBits: 'PAddr Bits',
+    include: 'Include',
+    
+    // Ball ISA
+    ballIsaEditor: 'Ball ISA Editor',
+    instructions: 'instructions',
+    addInstruction: 'Add Instruction',
+    searchInstructions: 'Search instructions...',
+    allBalls: 'All Balls',
+    mnemonic: 'Mnemonic',
+    funct7: 'funct7',
+    ballId: 'Ball ID',
+    ball: 'Ball',
+    actions: 'Actions',
+    edit: 'Edit',
+    
+    // Simulator
+    simControl: 'Simulation Control',
+    ready: 'Ready',
+    running: 'Running',
+    selectChip: 'Chip',
+    selectSimulator: 'Simulator',
+    selectBinary: 'Binary',
+    run: 'Run',
+    stop: 'Stop',
+    quickCommands: 'Quick Commands',
+    terminalOutput: 'Terminal Output',
+    clear: 'Clear',
+    exitCode: 'Exit code',
+    waveformSaved: 'Waveform saved',
+    selectBinaryFirst: 'Please select a binary first...',
+    readyToSimulate: 'Ready to run simulation...\nSelect chip, simulator, and binary to begin.',
+    simStopped: '>>> Simulation stopped by user',
+  }
+};
+
+// Language Context
+const LanguageContext = createContext();
+const useLanguage = () => useContext(LanguageContext);
+
+// ============================================
+// Constants & Mock Data
+// ============================================
+const MOCK_PROJECT = {
+  name: 'workspace',
+  path: '/path/to/buckyball',
+  structure: [
+    {
+      name: 'examples',
+      type: 'dir',
+      children: [
+        {
+          name: 'chips',
+          type: 'dir',
+          children: [
+            {
+              name: 'toy',
+              type: 'dir',
+              children: [
+                { name: 'arch', type: 'dir' },
+                { name: 'configs', type: 'dir', children: [
+                  { name: 'chip.toml', type: 'file' },
+                  { name: 'designs', type: 'dir', children: [
+                    { name: 'toy.toml', type: 'file' },
+                    { name: 'tiles', type: 'dir', children: [
+                      { name: 'default.toml', type: 'file' },
+                    ]},
+                  ]},
+                  { name: 'balldomains', type: 'dir' },
+                  { name: 'gpdomains', type: 'dir' },
+                ]},
+                { name: 'workloads', type: 'dir' },
+              ]
+            },
+            { name: 'pebble', type: 'dir' },
+            { name: 'poly', type: 'dir' },
+            { name: 'goban', type: 'dir' },
+          ]
+        },
+        { name: 'cores', type: 'dir' },
+        { name: 'balls', type: 'dir' },
+      ]
+    },
+    { name: 'scripts', type: 'dir' },
+  ]
+};
+
+const MOCK_CHIP_CONFIG = {
+  designs: { include: 'designs/toy.toml' },
+  sims: {
+    verilator: 'sims.verilator.BuckyballToyVerilatorConfig',
+    p2e: 'sims.p2e.P2EToyLinuxConfig',
+    firesim: 'sims.firesim.FireSimBuckyballToyConfig',
+  },
+  uvm: { balls: ['gemmini'], ips: ['axis'] }
+};
+
+const MOCK_DESIGN_CONFIG = {
+  top: { nTiles: 1 },
+  tiles: [
+    {
+      tile_id: 0,
+      include: 'tiles/default.toml',
+      coreDataBytes: 64,
+      xLen: 64,
+      vaddrBits: 39,
+      paddrBits: 56,
+      cores: [{ core_id: 0, include: 'core/default.toml' }],
+    }
+  ]
+};
+
+const MOCK_BALL_ISA = [
+  { mnemonic: 'GEMMINI_CONFIG', funct7: 2, bid: 0, ball: 'GemminiBall' },
+  { mnemonic: 'GEMMINI_FLUSH', funct7: 3, bid: 0, ball: 'GemminiBall' },
+  { mnemonic: 'GEMMINI_COMPUTE_PRELOADED', funct7: 66, bid: 0, ball: 'GemminiBall' },
+  { mnemonic: 'BDB_COUNTER', funct7: 4, bid: 1, ball: 'TraceBall' },
+  { mnemonic: 'RELU', funct7: 50, bid: 3, ball: 'ReluBall' },
+  { mnemonic: 'MXFP2INT', funct7: 55, bid: 2, ball: 'Mxfp2IntBall' },
+];
+
+const SIMULATION_TEMPLATES = [
+  { id: 'verilator', name: 'Verilator', desc: 'RTL simulation' },
+  { id: 'bebop-verilator', name: 'Bebop Verilator', desc: 'Fast emulator + verilator' },
+  { id: 'bemu', name: 'BEMU', desc: 'Bare metal emulator' },
+  { id: 'p2e', name: 'P2E', desc: 'FPGA emulation' },
+];
+
+const BBDEV_COMMANDS = [
+  { id: 'compiler-build', cmd: 'bbdev compiler --build', desc: 'Build Compiler' },
+  { id: 'workload-build', cmd: 'bbdev workload --build', desc: 'Build Workload' },
+  { id: 'verilator-run', cmd: 'bbdev verilator --run', desc: 'Run Verilator' },
+  { id: 'uvm-build', cmd: 'bbdev uvm --build', desc: 'Build UVM' },
+];
+
+// ============================================
+// Icons (Lucide-inspired SVG)
+// ============================================
+const Icons = {
+  Folder: ({ size = 16 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+    </svg>
+  ),
+  File: ({ size = 16 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/>
+    </svg>
+  ),
+  ChevronRight: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9 18 15 12 9 6"/>
+    </svg>
+  ),
+  ChevronDown: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 9 12 15 18 9"/>
+    </svg>
+  ),
+  Play: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <polygon points="5 3 19 12 5 21 5 3"/>
+    </svg>
+  ),
+  Square: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <rect x="6" y="6" width="12" height="12" rx="2"/>
+    </svg>
+  ),
+  Terminal: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+    </svg>
+  ),
+  Save: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+      <polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+    </svg>
+  ),
+  Settings: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg>
+  ),
+  Cpu: ({ size = 16 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/>
+      <line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/>
+      <line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/>
+      <line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/>
+      <line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/>
+    </svg>
+  ),
+  LayoutGrid: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+      <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+    </svg>
+  ),
+  Circle: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <circle cx="12" cy="12" r="10"/>
+    </svg>
+  ),
+  Zap: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+    </svg>
+  ),
+  Check: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12"/>
+    </svg>
+  ),
+  AlertCircle: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+    </svg>
+  ),
+  X: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>
+  ),
+  Plus: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+    </svg>
+  ),
+  Search: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </svg>
+  ),
+  Globe: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+    </svg>
+  ),
+  MessageSquare: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    </svg>
+  ),
+  Send: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+    </svg>
+  ),
+  Copy: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+    </svg>
+  ),
+  Bot: ({ size = 16 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="11" width="18" height="10" rx="2"/>
+      <circle cx="12" cy="5" r="2"/>
+      <path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/>
+    </svg>
+  ),
+  Sparkles: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
+      <path d="M5 19l.5 1.5L7 21l-1.5.5L5 23l-.5-1.5L3 21l1.5-.5L5 19z"/>
+      <path d="M19 13l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5L17 15l1.5-.5.5-1.5z"/>
+    </svg>
+  ),
+  Trash2: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+    </svg>
+  ),
+  User: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+    </svg>
+  ),
+  ChevronLeft: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="15 18 9 12 15 6"/>
+    </svg>
+  ),
+  PanelLeft: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+      <line x1="9" y1="3" x2="9" y2="21"/>
+    </svg>
+  ),
+  PanelRight: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+      <line x1="15" y1="3" x2="15" y2="21"/>
+    </svg>
+  ),
+};
+
+// ============================================
+// Base Components
+// ============================================
+function Button({ children, variant = 'primary', size = 'md', disabled, onClick, className = '' }) {
+  const base = {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+    fontWeight: 500, borderRadius: 'var(--radius-md)', border: '1px solid transparent',
+    cursor: disabled ? 'not-allowed' : 'pointer', transition: 'all 0.15s ease',
+    fontSize: size === 'sm' ? '12px' : '13px',
+    padding: size === 'sm' ? '6px 10px' : '8px 14px',
+  };
+  
+  const variants = {
+    primary: { 
+      background: 'var(--accent-color)', color: 'white', borderColor: 'var(--accent-color)',
+      opacity: disabled ? 0.5 : 1,
+    },
+    secondary: {
+      background: 'var(--bg-secondary)', color: 'var(--text-primary)', borderColor: 'var(--border-color)',
+    },
+    ghost: {
+      background: 'transparent', color: 'var(--text-secondary)', borderColor: 'transparent',
+    },
+    danger: {
+      background: 'var(--danger-bg)', color: 'var(--danger-color)', borderColor: 'transparent',
+    },
+  };
+  
+  const style = { ...base, ...variants[variant] };
+  
+  return (
+    <button style={style} disabled={disabled} onClick={onClick} className={className}
+      onMouseEnter={e => { if (!disabled) e.target.style.opacity = '0.85'; }}
+      onMouseLeave={e => { e.target.style.opacity = '1'; }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Input({ value, onChange, placeholder, style: customStyle, ...props }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <input
+      value={value}
+      onChange={onChange}
+      placeholder={placeholder}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={{
+        background: 'var(--bg-primary)',
+        border: `1px solid ${focused ? 'var(--accent-color)' : 'var(--border-color)'}`,
+        color: 'var(--text-primary)',
+        borderRadius: 'var(--radius-md)',
+        padding: '8px 12px',
+        fontSize: '13px',
+        outline: 'none',
+        transition: 'border-color 0.15s ease',
+        ...customStyle,
+      }}
+      {...props}
+    />
+  );
+}
+
+function Select({ value, onChange, options, style: customStyle }) {
+  return (
+    <select
+      value={value}
+      onChange={onChange}
+      style={{
+        background: 'var(--bg-primary)',
+        border: '1px solid var(--border-color)',
+        color: 'var(--text-primary)',
+        borderRadius: 'var(--radius-md)',
+        padding: '8px 12px',
+        fontSize: '13px',
+        outline: 'none',
+        cursor: 'pointer',
+        ...customStyle,
+      }}
+    >
+      {options.map(opt => (
+        <option key={typeof opt === 'string' ? opt : opt.value} value={typeof opt === 'string' ? opt : opt.value}>
+          {typeof opt === 'string' ? opt : opt.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function Badge({ children, variant = 'default' }) {
+  const variants = {
+    default: { background: 'var(--bg-secondary)', color: 'var(--text-secondary)' },
+    success: { background: 'var(--success-bg)', color: 'var(--success-color)' },
+    warning: { background: 'var(--warning-bg)', color: 'var(--warning-color)' },
+    danger: { background: 'var(--danger-bg)', color: 'var(--danger-color)' },
+    info: { background: 'var(--info-bg)', color: 'var(--info-color)' },
+  };
+  
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center',
+      padding: '2px 8px', borderRadius: 'var(--radius-full)',
+      fontSize: '11px', fontWeight: 500,
+      ...variants[variant],
+    }}>
+      {children}
+    </span>
+  );
+}
+
+function Card({ children, padding = true, className = '' }) {
+  return (
+    <div className={className} style={{
+      background: 'var(--bg-secondary)',
+      border: '1px solid var(--border-color)',
+      borderRadius: 'var(--radius-lg)',
+      padding: padding ? '16px' : 0,
+      boxShadow: 'var(--shadow-sm)',
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function Divider() {
+  return <div style={{ height: '1px', background: 'var(--border-color)', margin: '16px 0' }} />;
+}
+
+// ============================================
+// TreeView Component
+// ============================================
+function TreeItem({ item, path, level = 0, selected, onSelect }) {
+  const [expanded, setExpanded] = useState(level < 2);
+  const isDir = item.type === 'dir';
+  const isSelected = selected === path;
+  
+  return (
+    <div>
+      <div
+        onClick={() => {
+          if (isDir) setExpanded(!expanded);
+          if (isDir === false) onSelect(item, path);
+        }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '6px',
+          padding: '6px 12px',
+          paddingLeft: `${12 + level * 16}px`,
+          cursor: 'pointer',
+          borderRadius: 'var(--radius-sm)',
+          background: isSelected ? 'var(--accent-bg)' : 'transparent',
+          color: isSelected ? 'var(--accent-color)' : 'var(--text-primary)',
+          fontSize: '13px',
+          transition: 'all 0.1s ease',
+        }}
+        onMouseEnter={e => { if (!isSelected) e.target.style.background = 'var(--bg-hover)'; }}
+        onMouseLeave={e => { if (!isSelected) e.target.style.background = 'transparent'; }}
+      >
+        <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
+          {isDir ? (expanded ? <Icons.ChevronDown size={12} /> : <Icons.ChevronRight size={12} />) : null}
+        </span>
+        <span style={{ color: isSelected ? 'var(--accent-color)' : isDir ? 'var(--accent-color)' : 'var(--text-muted)' }}>
+          {isDir ? <Icons.Folder size={14} /> : <Icons.File size={14} />}
+        </span>
+        <span style={{ flex: 1 }}>{item.name}</span>
+        {!isDir && item.name.endsWith('.toml') && (
+          <Badge variant="info" style={{ fontSize: '10px' }}>TOML</Badge>
+        )}
+      </div>
+      {isDir && expanded && item.children && (
+        <div>
+          {item.children.map((child, i) => (
+            <TreeItem key={i} item={child} path={`${path}/${child.name}`} level={level + 1} selected={selected} onSelect={onSelect} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TreeView({ data, onSelect, selected }) {
+  return (
+    <div style={{ padding: '8px 0' }}>
+      {data.map((item, i) => (
+        <TreeItem key={i} item={item} path={item.name} level={0} selected={selected} onSelect={onSelect} />
+      ))}
+    </div>
+  );
+}
+
+// ============================================
+// Sidebar Component
+// ============================================
+function Sidebar({ project, onSelectFile, selectedFile, t }) {
+  return (
+    <aside style={{
+      width: '280px',
+      background: 'var(--bg-sidebar)',
+      borderRight: '1px solid var(--border-color)',
+      display: 'flex', flexDirection: 'column',
+      flexShrink: 0,
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: '12px 16px',
+        borderBottom: '1px solid var(--border-color)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ color: 'var(--accent-color)' }}><Icons.Folder size={16} /></span>
+          <span style={{ fontWeight: 600, fontSize: '14px' }}>{t(project.name)}</span>
+        </div>
+        <Button variant="ghost" size="sm">
+          <Icons.Settings size={12} />
+        </Button>
+      </div>
+      
+      {/* Search */}
+      <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-color)' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '8px',
+          background: 'var(--bg-primary)', border: '1px solid var(--border-color)',
+          borderRadius: 'var(--radius-md)', padding: '6px 10px',
+        }}>
+          <Icons.Search size={13} style={{ color: 'var(--text-muted)' }} />
+          <input
+            placeholder={t('searchFiles')}
+            style={{
+              flex: 1, border: 'none', background: 'transparent',
+              color: 'var(--text-primary)', fontSize: '13px', outline: 'none',
+            }}
+          />
+        </div>
+      </div>
+      
+      {/* File Tree */}
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <TreeView data={[project.structure[0]]} onSelect={onSelectFile} selected={selectedFile} />
+      </div>
+      
+      {/* Footer Actions */}
+      <div style={{
+        padding: '12px 16px', borderTop: '1px solid var(--border-color)',
+        display: 'flex', gap: '8px',
+      }}>
+        <Button variant="primary" size="sm" style={{ flex: 1 }}>
+          <Icons.Plus size={12} /> {t('new')}
+        </Button>
+        <Button variant="secondary" size="sm" style={{ flex: 1 }}>
+          {t('import')}
+        </Button>
+      </div>
+    </aside>
+  );
+}
+
+// ============================================
+// ChipEditor Component
+// ============================================
+function ChipEditor({ config, t, activeSubTab }) {
+  const [data, setData] = useState(config);
+  const [saved, setSaved] = useState(false);
+  
+  const handleSave = () => {
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+  
+  const subTabToSection = {
+    'chip-config': 'designs',
+    'chip-design-include': 'designs',
+    'chip-sim-targets': 'sims',
+    'chip-uvm': 'uvm',
+  };
+  
+  const activeSection = subTabToSection[activeSubTab] || 'designs';
+  
+  return (
+    <div style={{ height: '100%' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+        <div>
+          <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '4px' }}>{t('chipFile')}</h2>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('chipConfig')}</span>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {saved && <Badge variant="success">{t('saved')}</Badge>}
+          <Button onClick={handleSave}>
+            <Icons.Save size={13} /> {t('save')}
+          </Button>
+        </div>
+      </div>
+      
+      {/* Content */}
+      {activeSection === 'designs' && (
+        <Card>
+          <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Icons.LayoutGrid size={14} style={{ color: 'var(--accent-color)' }} /> {t('designInclude')}
+          </h3>
+          <div style={{ maxWidth: '400px' }}>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+              {t('designFilePath')}
+            </label>
+            <Input value={data.designs.include} style={{ width: '100%' }} />
+          </div>
+        </Card>
+      )}
+      
+      {activeSection === 'sims' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <Card>
+            <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Icons.Terminal size={14} style={{ color: 'var(--accent-color)' }} /> {t('simulationTargets')}
+            </h3>
+            {Object.entries(data.sims).map(([key, value]) => (
+              <div key={key} style={{ marginBottom: '12px' }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px', textTransform: 'capitalize' }}>
+                  {key}
+                </label>
+                <Input value={value} style={{ width: '100%', fontFamily: 'monospace', fontSize: '12px' }} />
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
+      
+      {activeSection === 'uvm' && (
+        <Card>
+          <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Icons.Check size={14} style={{ color: 'var(--accent-color)' }} /> {t('uvmConfig')}
+          </h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div>
+              <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>{t('balls')}</label>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {data.uvm.balls.map(ball => (
+                  <Badge key={ball} variant="info">{ball}</Badge>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>{t('ips')}</label>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {data.uvm.ips.map(ip => (
+                  <Badge key={ip}>{ip}</Badge>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ============================================
+// DesignEditor Component
+// ============================================
+function DesignEditor({ config, t, activeSubTab }) {
+  const [data, setData] = useState(config);
+  const [saved, setSaved] = useState(false);
+  
+  const handleSave = () => {
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+  
+  return (
+    <div style={{ height: '100%' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+        <div>
+          <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '4px' }}>{t('designConfig')}</h2>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('tileCoreLayout')}</span>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {saved && <Badge variant="success">{t('saved')}</Badge>}
+          <Button onClick={handleSave}>
+            <Icons.Save size={13} /> {t('save')}
+          </Button>
+        </div>
+      </div>
+      
+      {/* Top Config */}
+      <Card style={{ marginBottom: '16px' }}>
+        <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Icons.Cpu size={14} style={{ color: 'var(--accent-color)' }} /> {t('topConfig')}
+        </h3>
+        <div style={{ display: 'flex', gap: '24px' }}>
+          <div>
+            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+              {t('numTiles')}
+            </label>
+            <Input type="number" value={data.top.nTiles} style={{ width: '100px' }} />
+          </div>
+        </div>
+      </Card>
+      
+      {/* Tile Grid */}
+      <div style={{ marginBottom: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <h3 style={{ fontSize: '14px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Icons.LayoutGrid size={14} /> {t('tiles')}
+          </h3>
+          <Button variant="secondary" size="sm">
+            <Icons.Plus size={12} /> {t('addTile')}
+          </Button>
+        </div>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
+          {data.tiles.map((tile, index) => (
+            <Card key={index}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{
+                    width: '32px', height: '32px', borderRadius: 'var(--radius-md)',
+                    background: 'var(--accent-bg)', color: 'var(--accent-color)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <Icons.Cpu size={16} />
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '14px' }}>{t('tile')} {tile.tile_id}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('id')}: {tile.tile_id}</div>
+                  </div>
+                </div>
+                <Badge variant="success">{t('active')}</Badge>
+              </div>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>{t('coreDataBytes')}</label>
+                  <Input type="number" value={tile.coreDataBytes} style={{ width: '100%' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>{t('xlen')}</label>
+                  <Input type="number" value={tile.xLen} style={{ width: '100%' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>{t('vaddrBits')}</label>
+                  <Input type="number" value={tile.vaddrBits} style={{ width: '100%' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>{t('paddrBits')}</label>
+                  <Input type="number" value={tile.paddrBits} style={{ width: '100%' }} />
+                </div>
+              </div>
+              
+              <Divider />
+              
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>{t('include')}</label>
+                <div style={{
+                  fontSize: '11px', fontFamily: 'monospace', color: 'var(--text-secondary)',
+                  background: 'var(--bg-primary)', padding: '6px 10px', borderRadius: 'var(--radius-sm)',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {tile.include}
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// BallISAEditor Component
+// ============================================
+function BallISAEditor({ data: rawData, t, activeSubTab }) {
+  const [instructions] = useState(rawData);
+  const [filter, setFilter] = useState('');
+  const [selectedBall, setSelectedBall] = useState('all');
+  
+  const balls = [...new Set(rawData.map(i => i.ball))];
+  const filtered = instructions.filter(i => {
+    const matchFilter = i.mnemonic.toLowerCase().includes(filter.toLowerCase());
+    const matchBall = selectedBall === 'all' || i.ball === selectedBall;
+    return matchFilter && matchBall;
+  });
+  
+  const ballCounts = balls.reduce((acc, ball) => {
+    acc[ball] = instructions.filter(i => i.ball === ball).length;
+    return acc;
+  }, {});
+  
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+        <div>
+          <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '4px' }}>{t('ballIsaEditor')}</h2>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            {filtered.length} {t('instructions')}
+          </span>
+        </div>
+        <Button>
+          <Icons.Plus size={13} /> {t('addInstruction')}
+        </Button>
+      </div>
+      
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '8px',
+          background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+          borderRadius: 'var(--radius-md)', padding: '6px 12px', flex: 1, maxWidth: '280px',
+        }}>
+          <Icons.Search size={13} style={{ color: 'var(--text-muted)' }} />
+          <input
+            placeholder={t('searchInstructions')}
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            style={{
+              flex: 1, border: 'none', background: 'transparent',
+              color: 'var(--text-primary)', fontSize: '13px', outline: 'none',
+            }}
+          />
+        </div>
+        <Select
+          value={selectedBall}
+          onChange={e => setSelectedBall(e.target.value)}
+          options={[{ value: 'all', label: t('allBalls') }, ...balls.map(b => ({ value: b, label: b }))]}
+          style={{ minWidth: '150px' }}
+        />
+      </div>
+      
+      {/* Ball Stats */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+        {balls.map(ball => (
+          <button
+            key={ball}
+            onClick={() => setSelectedBall(selectedBall === ball ? 'all' : ball)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '6px',
+              padding: '6px 12px', borderRadius: 'var(--radius-full)',
+              background: selectedBall === ball ? 'var(--accent-bg)' : 'var(--bg-secondary)',
+              border: `1px solid ${selectedBall === ball ? 'var(--accent-border)' : 'var(--border-color)'}`,
+              color: selectedBall === ball ? 'var(--accent-color)' : 'var(--text-secondary)',
+              fontSize: '12px', fontWeight: 500, cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <Icons.Circle size={8} />
+            {ball}
+            <Badge variant={selectedBall === ball ? 'success' : 'default'}>{ballCounts[ball]}</Badge>
+          </button>
+        ))}
+      </div>
+      
+      {/* Instructions Table */}
+      <Card padding={false} style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ background: 'var(--bg-primary)' }}>
+              <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid var(--border-color)' }}>{t('mnemonic')}</th>
+              <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid var(--border-color)' }}>{t('funct7')}</th>
+              <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid var(--border-color)' }}>{t('ballId')}</th>
+              <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid var(--border-color)' }}>{t('ball')}</th>
+              <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid var(--border-color)', width: '100px' }}>{t('actions')}</th>
+            </tr>
+          </thead>
+        </table>
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <tbody>
+              {filtered.map((inst, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                  <td style={{ padding: '10px 16px', fontSize: '13px', fontFamily: 'monospace', color: 'var(--accent-color)' }}>{inst.mnemonic}</td>
+                  <td style={{ padding: '10px 16px', fontSize: '13px', fontFamily: 'monospace' }}>{inst.funct7}</td>
+                  <td style={{ padding: '10px 16px', fontSize: '13px' }}>{inst.bid}</td>
+                  <td style={{ padding: '10px 16px', fontSize: '13px' }}>
+                    <Badge>{inst.ball}</Badge>
+                  </td>
+                  <td style={{ padding: '10px 16px' }}>
+                    <Button variant="ghost" size="sm">{t('edit')}</Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ============================================
+// Simulator Component
+// ============================================
+function Simulator({ t, activeSubTab }) {
+  const [selectedChip, setSelectedChip] = useState('toy');
+  const [selectedSim, setSelectedSim] = useState('verilator');
+  const [selectedBinary, setSelectedBinary] = useState('');
+  const [isRunning, setIsRunning] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [taskId, setTaskId] = useState(null);
+  const terminalRef = useRef(null);
+  
+  const chips = ['toy', 'pebble', 'poly', 'goban'];
+  const binaries = [
+    'toy-toy-vecunit_matmul_ones-baremetal',
+    'toy-toy-vecunit_matmul_random-baremetal',
+    'toy-toy-gemmini_matmul-baremetal',
+  ];
+  
+  const runCommand = (cmd) => {
+    if (isRunning) return;
+    setIsRunning(true);
+    setLogs([]);
+    setTaskId('task-' + Date.now());
+    
+    const mockLogs = [
+      { type: 'info', text: `[${new Date().toLocaleTimeString()}] Starting: ${cmd} --chip ${selectedChip}` },
+      { type: 'info', text: `[${new Date().toLocaleTimeString()}] Resolving paths from chip.toml...` },
+      { type: 'info', text: `[${new Date().toLocaleTimeString()}] Loading design: designs/${selectedChip}.toml` },
+      { type: 'success', text: `[${new Date().toLocaleTimeString()}] Environment ready` },
+      { type: 'info', text: `[${new Date().toLocaleTimeString()}] Executing: ${cmd}` },
+      { type: 'info', text: '>>> Running simulation...' },
+      { type: 'info', text: '>>> [Progress: 25%] Loading binary...' },
+      { type: 'info', text: '>>> [Progress: 50%] Initializing tiles...' },
+      { type: 'info', text: '>>> [Progress: 75%] Running test...' },
+      { type: 'success', text: `[${new Date().toLocaleTimeString()}] Simulation completed successfully` },
+      { type: 'info', text: `[${new Date().toLocaleTimeString()}] ${t('exitCode')}: 0` },
+      { type: 'info', text: `[${new Date().toLocaleTimeString()}] ${t('waveformSaved')}: target/${selectedChip}/sim.vcd` },
+    ];
+    
+    let index = 0;
+    const interval = setInterval(() => {
+      if (index < mockLogs.length) {
+        setLogs(prev => [...prev, mockLogs[index]]);
+        index++;
+      } else {
+        clearInterval(interval);
+        setIsRunning(false);
+        setTaskId(null);
+      }
+    }, 400);
+  };
+  
+  const stopSimulation = () => {
+    setIsRunning(false);
+    setLogs(prev => [...prev, { type: 'warning', text: t('simStopped') }]);
+    setTaskId(null);
+  };
+  
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+    }
+  }, [logs]);
+  
+  const logColors = {
+    info: 'var(--text-secondary)',
+    success: 'var(--success-color)',
+    warning: 'var(--warning-color)',
+    error: 'var(--danger-color)',
+  };
+  
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <div>
+          <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '4px' }}>{t('simControl')}</h2>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            {isRunning ? `${t('running')} ${taskId}` : t('ready')}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <Badge variant={isRunning ? 'warning' : 'success'}>
+            {isRunning ? t('running') : t('ready')}
+          </Badge>
+          {taskId && (
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+              {taskId}
+            </span>
+          )}
+        </div>
+      </div>
+      
+      {/* Config Row */}
+      <Card style={{ marginBottom: '16px' }}>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ minWidth: '120px' }}>
+            <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>{t('selectChip')}</label>
+            <Select value={selectedChip} onChange={e => setSelectedChip(e.target.value)} options={chips} />
+          </div>
+          
+          <div style={{ minWidth: '160px' }}>
+            <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>{t('selectSimulator')}</label>
+            <Select value={selectedSim} onChange={e => setSelectedSim(e.target.value)} 
+              options={SIMULATION_TEMPLATES.map(s => ({ value: s.id, label: s.name }))} />
+          </div>
+          
+          <div style={{ flex: 1, minWidth: '200px' }}>
+            <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>{t('selectBinary')}</label>
+            <Select value={selectedBinary} onChange={e => setSelectedBinary(e.target.value)}
+              options={[{ value: '', label: t('selectBinaryFirst') }, ...binaries.map(b => ({ value: b, label: b }))]} />
+          </div>
+          
+          <Button 
+            variant={isRunning ? 'danger' : 'primary'}
+            onClick={() => isRunning ? stopSimulation() : runCommand(`bbdev ${selectedSim} --run`)}
+            disabled={!selectedBinary && !isRunning}
+          >
+            {isRunning ? <Icons.Square size={12} /> : <Icons.Play size={12} />}
+            {isRunning ? t('stop') : t('run')}
+          </Button>
+        </div>
+      </Card>
+      
+      {/* Quick Commands */}
+      <div style={{ marginBottom: '16px' }}>
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          {t('quickCommands')}
+        </div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {BBDEV_COMMANDS.map(cmd => (
+            <button
+              key={cmd.id}
+              onClick={() => runCommand(cmd.cmd)}
+              disabled={isRunning}
+              style={{
+                padding: '6px 12px', borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                color: 'var(--text-secondary)', fontSize: '12px', cursor: isRunning ? 'not-allowed' : 'pointer',
+                opacity: isRunning ? 0.5 : 1,
+              }}
+            >
+              {cmd.desc}
+            </button>
+          ))}
+        </div>
+      </div>
+      
+      {/* Terminal */}
+      <Card padding={false} style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '200px' }}>
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '10px 14px', borderBottom: '1px solid var(--border-color)',
+          background: 'var(--bg-primary)', borderRadius: 'var(--radius-lg) var(--radius-lg) 0 0',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '12px' }}>
+            <Icons.Terminal size={13} /> {t('terminalOutput')}
+          </div>
+          <button
+            onClick={() => setLogs([])}
+            style={{
+              border: 'none', background: 'transparent', color: 'var(--text-muted)',
+              fontSize: '11px', cursor: 'pointer',
+            }}
+          >
+            {t('clear')}
+          </button>
+        </div>
+        <div
+          ref={terminalRef}
+          style={{
+            flex: 1, padding: '12px 14px', overflow: 'auto',
+            background: '#0d1117', borderRadius: '0 0 var(--radius-lg) var(--radius-lg)',
+            fontFamily: "'SF Mono', Monaco, 'Cascadia Code', monospace",
+            fontSize: '12px', lineHeight: '1.6',
+          }}
+        >
+          {logs.length === 0 ? (
+            <div style={{ color: '#6e7681', whiteSpace: 'pre-line' }}>
+              {t('readyToSimulate')}
+            </div>
+          ) : (
+            logs.map((log, i) => (
+              <div key={i} style={{ color: logColors[log.type] || logColors.info, marginBottom: '2px' }}>
+                {log.text}
+              </div>
+            ))
+          )}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ============================================
+// Agent Assistant Panel Content (Embedded)
+// ============================================
+const AGENTS = [
+  { id: 'claude', name: 'Claude', color: '#d4a574', icon: 'A', desc: '复杂推理' },
+  { id: 'codex', name: 'Codex', color: '#009c83', icon: 'C', desc: '代码生成' },
+  { id: 'gemini', name: 'Gemini', color: '#4285f4', icon: 'G', desc: '多模态' },
+];
+
+const WORKFLOW_HINTS = {
+  chip: ['添加新的仿真目标', '配置 UVM 参数', '检查设计包含路径'],
+  design: ['添加新的 Tile', '调整 Core 参数', '生成默认配置'],
+  ball: ['注册新指令', '查看 Ball 依赖', '生成 ISA 测试'],
+  sim: ['调试仿真错误', '优化仿真速度', '分析波形输出'],
+};
+
+function AgentPanelContent({ activeTab, t }) {
+  const [selectedAgent, setSelectedAgent] = useState(AGENTS[0]);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [isThinking, setIsThinking] = useState(false);
+  const messagesEndRef = useRef(null);
+  
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+  
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+  
+  const handleSend = () => {
+    if (!input.trim() || isThinking) return;
+    
+    const userMessage = { role: 'user', content: input, id: Date.now() };
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+    setIsThinking(true);
+    
+    setTimeout(() => {
+      const responses = {
+        claud: "我来帮你分析当前配置...",
+        codex: "基于你的选择，我建议修改以下参数...",
+        gemini: "这是一个很好的起点，让我补充细节...",
+      };
+      
+      const agentMessage = {
+        role: 'assistant',
+        content: responses[selectedAgent.id] || '有什么可以帮你的？',
+        code: `// 建议配置
+config = {
+    "design": "toy",
+    "nTiles": ${Math.floor(Math.random() * 4) + 1},
+}`,
+        id: Date.now() + 1,
+      };
+      
+      setMessages(prev => [...prev, agentMessage]);
+      setIsThinking(false);
+    }, 1200);
+  };
+  
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+  
+  const copyCode = (code) => {
+    navigator.clipboard.writeText(code);
+  };
+  
+  const hints = WORKFLOW_HINTS[activeTab] || WORKFLOW_HINTS.chip;
+  
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+      {/* Agent Selector */}
+      <div style={{
+        padding: '10px 12px', borderBottom: '1px solid var(--border-color)',
+        display: 'flex', gap: '6px',
+      }}>
+        {AGENTS.map(agent => (
+          <button
+            key={agent.id}
+            onClick={() => setSelectedAgent(agent)}
+            style={{
+              flex: 1, display: 'flex', alignItems: 'center', gap: '4px',
+              padding: '6px 8px', borderRadius: 'var(--radius-md)',
+              background: selectedAgent.id === agent.id ? 'var(--accent-bg)' : 'var(--bg-primary)',
+              border: `1px solid ${selectedAgent.id === agent.id ? 'var(--accent-border)' : 'var(--border-color)'}`,
+              cursor: 'pointer', transition: 'all 0.15s ease',
+              color: 'var(--text-primary)',
+            }}
+          >
+            <div style={{
+              width: '20px', height: '20px', borderRadius: 'var(--radius-sm)',
+              background: agent.color, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'white', fontWeight: 700, fontSize: '10px',
+            }}>
+              {agent.icon}
+            </div>
+            <span style={{ fontSize: '11px', fontWeight: 500 }}>{agent.name}</span>
+          </button>
+        ))}
+      </div>
+      
+      {/* Quick Hints */}
+      <div style={{
+        padding: '10px 12px', borderBottom: '1px solid var(--border-color)',
+        background: 'var(--bg-primary)',
+      }}>
+        <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          {t('quickActions')}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+          {hints.map((hint, i) => (
+            <button
+              key={i}
+              onClick={() => setInput(hint + '？')}
+              style={{
+                padding: '4px 8px', borderRadius: 'var(--radius-full)',
+                background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                color: 'var(--text-secondary)', fontSize: '10px', cursor: 'pointer',
+              }}
+            >
+              {hint}
+            </button>
+          ))}
+        </div>
+      </div>
+      
+      {/* Messages */}
+      <div style={{ flex: 1, overflow: 'auto', padding: '12px' }}>
+        {messages.length === 0 ? (
+          <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '16px' }}>
+            <Icons.Bot size={28} style={{ marginBottom: '8px', opacity: 0.5 }} />
+            <p style={{ fontSize: '12px' }}>{t('agentWelcome')}</p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {messages.map(msg => (
+              <div key={msg.id} style={{
+                display: 'flex', flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
+                gap: '6px',
+              }}>
+                <div style={{
+                  width: '22px', height: '22px', borderRadius: 'var(--radius-sm)', flexShrink: 0,
+                  background: msg.role === 'user' ? 'var(--accent-color)' : selectedAgent.color,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: 'white', fontWeight: 600, fontSize: '9px',
+                }}>
+                  {msg.role === 'user' ? 'U' : selectedAgent.icon}
+                </div>
+                <div style={{
+                  maxWidth: '85%',
+                  background: msg.role === 'user' ? 'var(--accent-bg)' : 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '8px 10px',
+                  fontSize: '11px',
+                  lineHeight: '1.4',
+                }}>
+                  <div>{msg.content}</div>
+                  {msg.code && (
+                    <div style={{ marginTop: '6px', background: '#0d1117', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 6px', borderBottom: '1px solid #30363d' }}>
+                        <button
+                          onClick={() => copyCode(msg.code)}
+                          style={{
+                            border: 'none', background: 'transparent', color: '#8b949e',
+                            fontSize: '9px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px',
+                          }}
+                        >
+                          <Icons.Copy size={9} /> {t('copyCode')}
+                        </button>
+                      </div>
+                      <pre style={{ margin: 0, padding: '6px', fontSize: '10px', fontFamily: 'monospace', color: '#c9d1d9', overflow: 'auto' }}>
+                        {msg.code}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            
+            {isThinking && (
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <div style={{
+                  width: '22px', height: '22px', borderRadius: 'var(--radius-sm)', background: selectedAgent.color,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 600, fontSize: '9px',
+                }}>
+                  {selectedAgent.icon}
+                </div>
+                <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '8px 10px' }}>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    {[0, 1, 2].map(i => (
+                      <div key={i} style={{
+                        width: '5px', height: '5px', borderRadius: '50%', background: 'var(--text-muted)',
+                        animation: `pulse 1s ease-in-out infinite ${i * 0.2}s`,
+                      }} />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        )}
+      </div>
+      
+      {/* Input */}
+      <div style={{
+        padding: '10px 12px', borderTop: '1px solid var(--border-color)',
+        background: 'var(--bg-primary)',
+      }}>
+        <div style={{
+          display: 'flex', gap: '6px', alignItems: 'flex-end',
+          background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+          borderRadius: 'var(--radius-md)', padding: '6px 8px',
+        }}>
+          <textarea
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={t('sendMessage')}
+            rows={1}
+            style={{
+              flex: 1, border: 'none', background: 'transparent',
+              color: 'var(--text-primary)', fontSize: '11px', outline: 'none',
+              resize: 'none', maxHeight: '60px', lineHeight: '1.4',
+            }}
+          />
+          <button
+            onClick={handleSend}
+            disabled={!input.trim() || isThinking}
+            style={{
+              padding: '5px 8px', borderRadius: 'var(--radius-sm)',
+              background: 'var(--accent-color)', border: 'none',
+              color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center',
+              opacity: !input.trim() || isThinking ? 0.5 : 1,
+            }}
+          >
+            <Icons.Send size={12} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// Left Drawer Navigation Component
+// ============================================
+function LeftDrawerNav({ activeTab, activeSubTab, onSubTabChange, onTabChange, t }) {
+  const [expandedGroup, setExpandedGroup] = useState(activeTab);
+  
+  // Auto-expand when tab changes
+  useEffect(() => {
+    setExpandedGroup(activeTab);
+  }, [activeTab]);
+  
+  // Map item IDs to their parent tabs
+  const itemToTab = {
+    'chip-config': 'chip', 'chip-design-include': 'chip', 'chip-sim-targets': 'chip', 'chip-uvm': 'chip',
+    'design-layout': 'design', 'design-top': 'design', 'design-tiles': 'design',
+    'ball-isa': 'ball', 'ball-list': 'ball',
+    'sim-control': 'sim', 'sim-terminal': 'sim', 'sim-commands': 'sim',
+  };
+  
+  const handleItemClick = (itemId) => {
+    const parentTab = itemToTab[itemId];
+    if (parentTab && parentTab !== activeTab) {
+      onTabChange(parentTab);
+    }
+    onSubTabChange(itemId);
+  };
+  
+  const drawerGroups = [
+    {
+      id: 'chip',
+      label: 'chip',
+      icon: <Icons.Settings size={14} />,
+      items: [
+        { id: 'chip-config', label: 'chipFile', icon: <Icons.File size={12} /> },
+        { id: 'chip-design-include', label: 'designInclude', icon: <Icons.Folder size={12} /> },
+        { id: 'chip-sim-targets', label: 'simulationTargets', icon: <Icons.Terminal size={12} /> },
+        { id: 'chip-uvm', label: 'uvmConfig', icon: <Icons.Check size={12} /> },
+      ],
+    },
+    {
+      id: 'design',
+      label: 'designs',
+      icon: <Icons.LayoutGrid size={14} />,
+      items: [
+        { id: 'design-layout', label: 'tileCoreLayout', icon: <Icons.LayoutGrid size={12} /> },
+        { id: 'design-top', label: 'topConfig', icon: <Icons.Settings size={12} /> },
+        { id: 'design-tiles', label: 'tiles', icon: <Icons.Cpu size={12} /> },
+      ],
+    },
+    {
+      id: 'ball',
+      label: 'ballIsa',
+      icon: <Icons.Zap size={14} />,
+      items: [
+        { id: 'ball-isa', label: 'instructions', icon: <Icons.Zap size={12} /> },
+        { id: 'ball-list', label: 'allBalls', icon: <Icons.Circle size={12} /> },
+      ],
+    },
+    {
+      id: 'sim',
+      label: 'simulator',
+      icon: <Icons.Terminal size={14} />,
+      items: [
+        { id: 'sim-control', label: 'simControl', icon: <Icons.Play size={12} /> },
+        { id: 'sim-terminal', label: 'terminalOutput', icon: <Icons.Terminal size={12} /> },
+        { id: 'sim-commands', label: 'quickCommands', icon: <Icons.Cpu size={12} /> },
+      ],
+    },
+  ];
+  
+  const toggleGroup = (groupId) => {
+    setExpandedGroup(expandedGroup === groupId ? null : groupId);
+  };
+  
+  const isGroupActive = (groupId) => activeTab === groupId;
+  const isItemActive = (itemId) => activeSubTab === itemId;
+  
+  return (
+    <div style={{
+      width: '220px',
+      background: 'var(--bg-sidebar)',
+      borderRight: '1px solid var(--border-color)',
+      display: 'flex', flexDirection: 'column',
+      flexShrink: 0, overflow: 'hidden',
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: '12px 14px',
+        borderBottom: '1px solid var(--border-color)',
+      }}>
+        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          {t('config')}
+        </div>
+      </div>
+      
+      {/* Drawer Groups */}
+      <div style={{ flex: 1, overflow: 'auto', padding: '8px' }}>
+        {drawerGroups.map(group => {
+          const isExpanded = expandedGroup === group.id;
+          const hasActiveChild = group.items.some(item => isItemActive(item.id));
+          
+          return (
+            <div key={group.id} style={{ marginBottom: '4px' }}>
+              {/* Group Header (Drawer Button) */}
+              <button
+                onClick={() => toggleGroup(group.id)}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: '8px',
+                  padding: '8px 10px', borderRadius: 'var(--radius-md)',
+                  background: isGroupActive(group.id) ? 'var(--accent-bg)' : 'transparent',
+                  border: 'none', cursor: 'pointer',
+                  color: isGroupActive(group.id) ? 'var(--accent-color)' : 'var(--text-secondary)',
+                  fontSize: '12px', fontWeight: 500, textAlign: 'left',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={e => { if (!isGroupActive(group.id)) e.target.style.background = 'var(--bg-hover)'; }}
+                onMouseLeave={e => { if (!isGroupActive(group.id)) e.target.style.background = 'transparent'; }}
+              >
+                <span style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }}>
+                  <Icons.ChevronRight size={12} />
+                </span>
+                {group.icon}
+                <span style={{ flex: 1 }}>{t(group.label)}</span>
+                {hasActiveChild && (
+                  <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--accent-color)' }} />
+                )}
+              </button>
+              
+              {/* Sub-items (Drawer Content) */}
+              <div style={{
+                overflow: 'hidden',
+                maxHeight: isExpanded ? `${group.items.length * 40}px` : '0',
+                opacity: isExpanded ? 1 : 0,
+                transition: 'all 0.2s ease',
+                paddingLeft: '20px',
+              }}>
+                {group.items.map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => handleItemClick(item.id)}
+                    style={{
+                      width: '100%', display: 'flex', alignItems: 'center', gap: '8px',
+                      padding: '7px 10px', borderRadius: 'var(--radius-sm)',
+                      background: isItemActive(item.id) ? 'var(--accent-bg)' : 'transparent',
+                      border: 'none', cursor: 'pointer',
+                      color: isItemActive(item.id) ? 'var(--accent-color)' : 'var(--text-muted)',
+                      fontSize: '11px', textAlign: 'left', marginBottom: '2px',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={e => { if (!isItemActive(item.id)) e.target.style.background = 'var(--bg-hover)'; }}
+                    onMouseLeave={e => { if (!isItemActive(item.id)) e.target.style.background = 'transparent'; }}
+                  >
+                    {item.icon}
+                    <span style={{ fontWeight: isItemActive(item.id) ? 500 : 400 }}>{t(item.label)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// Right Panel (Explorer + Agent Tabs)
+// ============================================
+function RightPanel({ activeTab, t, onCollapse }) {
+  const [activeSection, setActiveSection] = useState('explorer');
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [agentMessages, setAgentMessages] = useState([]);
+  const [agentInput, setAgentInput] = useState('');
+  const [isThinking, setIsThinking] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState(AGENTS[0]);
+  const messagesEndRef = useRef(null);
+  
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [agentMessages]);
+  
+  const handleAgentSend = () => {
+    if (!agentInput.trim() || isThinking) return;
+    const userMsg = { role: 'user', content: agentInput, id: Date.now() };
+    setAgentMessages(prev => [...prev, userMsg]);
+    setAgentInput('');
+    setIsThinking(true);
+    
+    setTimeout(() => {
+      const agentMsg = {
+        role: 'assistant',
+        content: '我来帮你分析当前配置...',
+        id: Date.now() + 1,
+      };
+      setAgentMessages(prev => [...prev, agentMsg]);
+      setIsThinking(false);
+    }, 1200);
+  };
+  
+  return (
+    <div style={{
+      width: '280px',
+      background: 'var(--bg-sidebar)',
+      borderLeft: '1px solid var(--border-color)',
+      display: 'flex', flexDirection: 'column',
+      flexShrink: 0,
+    }}>
+      {/* Section Tabs with Collapse */}
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)' }}>
+        <div style={{ flex: 1, display: 'flex' }}>
+          <button
+            onClick={() => setActiveSection('explorer')}
+            style={{
+              flex: 1, padding: '10px', border: 'none', cursor: 'pointer',
+              background: activeSection === 'explorer' ? 'var(--bg-primary)' : 'transparent',
+              borderBottom: activeSection === 'explorer' ? '2px solid var(--accent-color)' : '2px solid transparent',
+              color: activeSection === 'explorer' ? 'var(--accent-color)' : 'var(--text-muted)',
+            fontSize: '11px', fontWeight: 500,
+          }}
+        >
+          {t('workspace')}
+        </button>
+        <button
+          onClick={() => setActiveSection('agent')}
+          style={{
+            flex: 1, padding: '10px', border: 'none', cursor: 'pointer',
+            background: activeSection === 'agent' ? 'var(--bg-primary)' : 'transparent',
+            borderBottom: activeSection === 'agent' ? '2px solid var(--accent-color)' : '2px solid transparent',
+            color: activeSection === 'agent' ? 'var(--accent-color)' : 'var(--text-muted)',
+            fontSize: '11px', fontWeight: 500,
+          }}
+        >
+          <Icons.Sparkles size={11} style={{ marginRight: '4px' }} />
+          {t('agentAssistant')}
+        </button>
+        </div>
+        {/* Collapse Button */}
+        <button
+          onClick={onCollapse}
+          style={{
+            padding: '10px',
+            border: 'none',
+            borderLeft: '1px solid var(--border-color)',
+            background: 'transparent',
+            cursor: 'pointer',
+            color: 'var(--text-muted)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          onMouseEnter={e => { e.target.style.background = 'var(--bg-hover)'; }}
+          onMouseLeave={e => { e.target.style.background = 'transparent'; }}
+        >
+          <Icons.PanelLeft size={12} />
+        </button>
+      </div>
+      
+      {/* Explorer Section */}
+      {activeSection === 'explorer' && (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '5px 8px' }}>
+              <Icons.Search size={12} style={{ color: 'var(--text-muted)' }} />
+              <input placeholder={t('searchFiles')} style={{ flex: 1, border: 'none', background: 'transparent', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }} />
+            </div>
+          </div>
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            <TreeView data={[MOCK_PROJECT.structure[0]]} onSelect={(item, path) => setSelectedFile(path)} selected={selectedFile} />
+          </div>
+          <div style={{ padding: '8px', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '6px' }}>
+            <Button variant="secondary" size="sm" style={{ flex: 1 }}><Icons.Plus size={11} /> {t('new')}</Button>
+            <Button variant="secondary" size="sm" style={{ flex: 1 }}>{t('import')}</Button>
+          </div>
+        </div>
+      )}
+      
+      {/* Agent Section */}
+      {activeSection === 'agent' && (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* Agent Selector */}
+          <div style={{ padding: '8px', borderBottom: '1px solid var(--border-color)', display: 'flex', gap: '4px' }}>
+            {AGENTS.map(agent => (
+              <button
+                key={agent.id}
+                onClick={() => setSelectedAgent(agent)}
+                style={{
+                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                  padding: '6px', borderRadius: 'var(--radius-sm)',
+                  background: selectedAgent.id === agent.id ? 'var(--accent-bg)' : 'var(--bg-primary)',
+                  border: `1px solid ${selectedAgent.id === agent.id ? 'var(--accent-border)' : 'var(--border-color)'}`,
+                  cursor: 'pointer', color: 'var(--text-primary)',
+                }}
+              >
+                <div style={{ width: '20px', height: '20px', borderRadius: '4px', background: agent.color, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: '9px' }}>
+                  {agent.icon}
+                </div>
+                <span style={{ fontSize: '10px', fontWeight: 500 }}>{agent.name}</span>
+              </button>
+            ))}
+          </div>
+          
+          {/* Messages */}
+          <div style={{ flex: 1, overflow: 'auto', padding: '8px' }}>
+            {agentMessages.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px 12px' }}>
+                <Icons.Bot size={28} style={{ opacity: 0.5, marginBottom: '8px' }} />
+                <p style={{ fontSize: '11px', lineHeight: 1.4 }}>{t('agentWelcome')}</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {agentMessages.map(msg => (
+                  <div key={msg.id} style={{ display: 'flex', gap: '6px', flexDirection: msg.role === 'user' ? 'row-reverse' : 'row' }}>
+                    <div style={{ width: '22px', height: '22px', borderRadius: '4px', flexShrink: 0, background: msg.role === 'user' ? 'var(--accent-color)' : selectedAgent.color, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 600, fontSize: '8px' }}>
+                      {msg.role === 'user' ? 'U' : selectedAgent.icon}
+                    </div>
+                    <div style={{ maxWidth: '80%', background: msg.role === 'user' ? 'var(--accent-bg)' : 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '8px 10px', fontSize: '11px', lineHeight: 1.4 }}>
+                      {msg.content}
+                    </div>
+                  </div>
+                ))}
+                {isThinking && (
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <div style={{ width: '22px', height: '22px', borderRadius: '4px', background: selectedAgent.color, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 600, fontSize: '8px' }}>
+                      {selectedAgent.icon}
+                    </div>
+                    <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '8px 12px' }}>
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        {[0,1,2].map(i => <div key={i} style={{ width: '5px', height: '5px', borderRadius: '50%', background: 'var(--text-muted)', animation: `pulse 1s ease-in-out infinite ${i*0.2}s` }} />)}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
+          </div>
+          
+          {/* Input */}
+          <div style={{ padding: '8px', borderTop: '1px solid var(--border-color)', background: 'var(--bg-primary)' }}>
+            <div style={{ display: 'flex', gap: '6px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '6px 8px' }}>
+              <input
+                value={agentInput}
+                onChange={e => setAgentInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleAgentSend(); }}
+                placeholder={t('sendMessage')}
+                style={{ flex: 1, border: 'none', background: 'transparent', color: 'var(--text-primary)', fontSize: '11px', outline: 'none' }}
+              />
+              <button onClick={handleAgentSend} disabled={!agentInput.trim() || isThinking} style={{ padding: '4px 8px', borderRadius: '4px', background: 'var(--accent-color)', border: 'none', color: 'white', cursor: 'pointer', opacity: !agentInput.trim() || isThinking ? 0.5 : 1 }}>
+                <Icons.Send size={12} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      <style>{`@keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }`}</style>
+    </div>
+  );
+}
+
+// ============================================
+// Main App Component (New Layout)
+// ============================================
+function App() {
+  const [lang, setLang] = useState('zh');
+  const [activeTab, setActiveTab] = useState('chip');
+  const [activeSubTab, setActiveSubTab] = useState('chip-config');
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  
+  const t = useCallback((key) => translations[lang][key] || key, [lang]);
+  
+  // Update sub tab when main tab changes
+  useEffect(() => {
+    const defaultSubTabs = {
+      chip: 'chip-config',
+      design: 'design-layout',
+      ball: 'ball-isa',
+      sim: 'sim-control',
+    };
+    setActiveSubTab(defaultSubTabs[activeTab]);
+  }, [activeTab]);
+  
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'chip': return <ChipEditor config={MOCK_CHIP_CONFIG} t={t} activeSubTab={activeSubTab} />;
+      case 'design': return <DesignEditor config={MOCK_DESIGN_CONFIG} t={t} activeSubTab={activeSubTab} />;
+      case 'ball': return <BallISAEditor data={MOCK_BALL_ISA} t={t} activeSubTab={activeSubTab} />;
+      case 'sim': return <Simulator t={t} activeSubTab={activeSubTab} />;
+      default: return <ChipEditor config={MOCK_CHIP_CONFIG} t={t} activeSubTab={activeSubTab} />;
+    }
+  };
+  
+  return (
+    <LanguageContext.Provider value={{ lang, setLang, t }}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-primary)' }}>
+        {/* Header */}
+        <header style={{
+          height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 16px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)',
+          flexShrink: 0, zIndex: 100,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{
+              width: '28px', height: '28px', borderRadius: 'var(--radius-md)',
+              background: 'linear-gradient(135deg, var(--accent-color), var(--accent-hover))',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white',
+              fontSize: '14px', fontWeight: 700,
+            }}>
+              B
+            </div>
+            <span style={{ fontWeight: 600, fontSize: '15px', color: 'var(--text-primary)' }}>
+              {t('appName')}
+            </span>
+            <Badge variant="info">{t('webPreview')}</Badge>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                padding: '6px 12px', borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-primary)', border: '1px solid var(--border-color)',
+                color: 'var(--text-primary)', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
+              }}
+            >
+              <Icons.Globe size={13} />
+              {lang === 'zh' ? 'EN' : '中'}
+            </button>
+            <Button variant="ghost" size="sm">
+              <Icons.Settings size={13} />
+            </Button>
+          </div>
+        </header>
+        
+        {/* Main Layout: Left Drawer + Center Content + Right Panel */}
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          {/* Left Drawer Navigation */}
+          <LeftDrawerNav activeTab={activeTab} activeSubTab={activeSubTab} onSubTabChange={setActiveSubTab} onTabChange={setActiveTab} t={t} />
+          
+          {/* Center Content */}
+          <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+            <div style={{ flex: 1, overflow: 'auto', padding: '24px' }}>
+              {renderContent()}
+            </div>
+          </main>
+          
+          {/* Right Panel (Explorer + Agent) - Collapsible */}
+          <div style={{
+            width: rightPanelCollapsed ? '0px' : '280px',
+            overflow: 'hidden',
+            transition: 'width 0.25s ease',
+            flexShrink: 0,
+            display: 'flex',
+          }}>
+            <RightPanel 
+              activeTab={activeTab} 
+              t={t} 
+              onCollapse={() => setRightPanelCollapsed(true)} 
+            />
+          </div>
+          
+          {/* Collapse Button */}
+          <button
+            onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+            style={{
+              width: '20px',
+              background: rightPanelCollapsed ? 'var(--bg-primary)' : 'var(--bg-sidebar)',
+              border: 'none',
+              borderLeft: rightPanelCollapsed ? 'none' : '1px solid var(--border-color)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--text-muted)',
+              flexShrink: 0,
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={e => { e.target.style.background = 'var(--bg-hover)'; }}
+            onMouseLeave={e => { e.target.style.background = rightPanelCollapsed ? 'var(--bg-primary)' : 'var(--bg-sidebar)'; }}
+          >
+            <span style={{ transform: rightPanelCollapsed ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }}>
+              <Icons.PanelLeft size={14} />
+            </span>
+          </button>
+        </div>
+      </div>
+    </LanguageContext.Provider>
+  );
+}
+
+// Mount
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
