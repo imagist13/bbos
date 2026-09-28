@@ -4,6 +4,7 @@
 
 | 日期 | 文件 | 主要内容 |
 |------|------|----------|
+| 2026-09-28 | [day2](./2026-09-28-day2.md) | BB-Agent fork 清理：删 Browser/Computer use 设置（i18n），agent 自称改名 Atrium → bb-agent |
 | 2026-09-26 | [day1](./2026-09-26-day1.md) | 骨架完成（Step 1–5），放弃 Nix，改 fake bbdev 全在 Windows 开发 |
 
 ## 命名约定

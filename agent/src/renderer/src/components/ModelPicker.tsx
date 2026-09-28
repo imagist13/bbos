@@ -1,0 +1,194 @@
+import * as Popover from '@radix-ui/react-popover';
+import { Link } from '@tanstack/react-router';
+import { Check, ChevronDown, Search } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { ModelGroup } from '../lib/use-chat-model';
+import { ProviderIcon } from './settings/providers/ProviderIcon';
+
+export type ModelValue = { providerId: string; modelId: string } | null;
+
+type ModelPickerProps = {
+  /** Current selection, or null (nothing chosen / inherit). */
+  value: ModelValue;
+  onChange: (value: ModelValue) => void;
+  groups: ModelGroup[];
+  /** Trigger chrome: quiet inline (composer) vs bordered field (settings form). */
+  variant?: 'inline' | 'field';
+  /** When set, offers an "inherit" row that selects null, and labels an empty value. */
+  inheritLabel?: string;
+  /** Trigger label when value is null and there's no inherit option. */
+  placeholder?: string;
+  onSelected?: () => void;
+};
+
+/**
+ * Model selector: a popover grouping models by provider (brand icons, search).
+ * Controlled — the caller owns the value, so it drives both the composer (bound
+ * to the active chat model) and the subagent form (a pinned model, or inherit).
+ * Built on Radix Popover, which handles collision-aware placement, width, focus
+ * and click-away.
+ */
+export function ModelPicker({
+  value,
+  onChange,
+  groups,
+  variant = 'inline',
+  inheritLabel,
+  placeholder,
+  onSelected,
+}: ModelPickerProps): React.JSX.Element {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+
+  const label = value
+    ? value.modelId
+    : (inheritLabel ?? placeholder ?? t('modelPicker.placeholder'));
+  const triggerClass =
+    variant === 'field'
+      ? 'flex w-full items-center justify-between gap-1.5 rounded-lg border border-border-default bg-surface px-3 py-2 text-fg-primary text-sm hover:border-border-strong'
+      : 'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-fg-tertiary text-sm hover:bg-elevated hover:text-fg-secondary';
+  // A field trigger can be narrow (a right-aligned settings row) or wide (a form
+  // field): floor the panel so model names never truncate, but let it grow to a
+  // wide trigger. Inline (composer) is a fixed menu.
+  const widthClass =
+    variant === 'field' ? 'min-w-[280px] w-[var(--radix-popover-trigger-width)]' : 'w-80';
+
+  const pick = (v: ModelValue): void => {
+    onChange(v);
+    setOpen(false);
+    onSelected?.();
+  };
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button type="button" className={triggerClass}>
+          <span className={variant === 'field' && !value ? 'text-fg-tertiary' : undefined}>
+            {label}
+          </span>
+          <ChevronDown className="size-[14px] shrink-0" />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          // Anchor the right edge to the trigger so a panel wider than a narrow
+          // right-aligned trigger opens leftward, staying on-screen.
+          align="end"
+          side="bottom"
+          sideOffset={6}
+          collisionPadding={12}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          className={`z-50 flex max-h-[min(340px,var(--radix-popover-content-available-height))] flex-col overflow-hidden rounded-lg border border-border-default bg-elevated shadow-lg ${widthClass}`}
+        >
+          <ModelList groups={groups} value={value} inheritLabel={inheritLabel} onPick={pick} />
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+function ModelList({
+  groups,
+  value,
+  inheritLabel,
+  onPick,
+}: {
+  groups: ModelGroup[];
+  value: ModelValue;
+  inheritLabel?: string;
+  onPick: (value: ModelValue) => void;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const filtered = useMemo(() => {
+    const q = query.toLowerCase();
+    return (
+      groups
+        // External providers match by name (they have no real model to search).
+        .map((g) => ({ ...g, models: g.models.filter((m) => m.toLowerCase().includes(q)) }))
+        .filter((g) => g.models.length > 0)
+    );
+  }, [groups, query]);
+
+  if (groups.length === 0) {
+    return (
+      <div className="px-6 py-8 text-center text-fg-tertiary text-sm">
+        {t('modelPicker.empty')}
+        <br />
+        <Link
+          to="/settings/$section"
+          params={{ section: 'providers' }}
+          className="text-accent hover:underline"
+        >
+          {t('modelPicker.configure')}
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="flex shrink-0 items-center gap-2 border-border-default border-b px-3 py-2">
+        <Search className="size-[14px] shrink-0 text-fg-tertiary" />
+        <input
+          // biome-ignore lint/a11y/noAutofocus: focuses the search when the popover opens
+          autoFocus
+          ref={searchRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t('modelPicker.search')}
+          className="flex-1 border-0 bg-transparent text-fg-primary text-sm outline-0 placeholder:text-fg-disabled"
+        />
+      </div>
+      <ul style={{ scrollbarGutter: 'stable' }} className="min-h-0 flex-1 overflow-y-auto p-1">
+        {inheritLabel && query.length === 0 && (
+          <li>
+            <button
+              type="button"
+              onClick={() => onPick(null)}
+              className={`flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm hover:bg-surface-strong ${
+                value === null ? 'text-fg-primary' : 'text-fg-secondary'
+              }`}
+            >
+              <span className="min-w-0 flex-1 truncate">{inheritLabel}</span>
+              {value === null && <Check className="size-[14px] shrink-0 text-accent" />}
+            </button>
+          </li>
+        )}
+        {filtered.length === 0 ? (
+          <li className="px-3 py-6 text-center text-fg-tertiary text-sm">
+            {t('modelPicker.noMatch')}
+          </li>
+        ) : (
+          filtered.map((g) => (
+            <li key={g.providerId}>
+              <div className="flex items-center gap-1.5 px-3 pt-2 pb-1 font-medium text-[10.5px] text-fg-tertiary uppercase tracking-wider">
+                <ProviderIcon id={g.providerId} className="size-3.5" />
+                {g.providerName}
+              </div>
+              {g.models.map((m) => {
+                const isSel = value?.providerId === g.providerId && value?.modelId === m;
+                return (
+                  <button
+                    type="button"
+                    key={m}
+                    onClick={() => onPick({ providerId: g.providerId, modelId: m })}
+                    className={`flex w-full items-center gap-2 rounded-md py-1.5 pr-3 pl-8 text-left text-sm hover:bg-surface-strong ${
+                      isSel ? 'text-fg-primary' : 'text-fg-secondary'
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1 truncate font-mono text-xs">{m}</span>
+                    {isSel && <Check className="size-[14px] shrink-0 text-accent" />}
+                  </button>
+                );
+              })}
+            </li>
+          ))
+        )}
+      </ul>
+    </>
+  );
+}

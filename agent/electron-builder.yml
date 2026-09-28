@@ -1,0 +1,60 @@
+appId: com.buckyball.bb-agent
+productName: BB-Agent
+publish:
+  provider: github
+  owner: buckyball
+  repo: bb-agent
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!design/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!drizzle.config.ts'
+  - '!biome.json'
+  - '!{.env,.env.*,.npmrc,bun.lockb,bun.lock}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!{README.md,CHANGELOG.md,dev-app-update.yml}'
+extraResources:
+  - from: drizzle/migrations
+    to: drizzle/migrations
+    filter:
+      - '**/*'
+  - from: resources/skills
+    to: skills
+    filter:
+      - '**/*'
+asarUnpack:
+  - resources/**
+  # jieba-wasm reads its .wasm via fs.readFileSync(__dirname/...); unpack it so
+  # the file resolves on disk rather than from inside the asar archive.
+  - node_modules/jieba-wasm/**
+mac:
+  target:
+    - dmg
+    - zip
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    - NSCameraUsageDescription: BB-Agent 需要访问相机以支持相关功能。
+    - NSMicrophoneUsageDescription: BB-Agent 需要访问麦克风以支持语音输入。
+    - NSDocumentsFolderUsageDescription: BB-Agent 需要访问"文稿"文件夹以读写工作区文件。
+    - NSDownloadsFolderUsageDescription: BB-Agent 需要访问"下载"文件夹以保存生成的产物。
+dmg:
+  artifactName: ${name}-${version}-${arch}.${ext}
+win:
+  target:
+    - nsis
+  artifactName: ${name}-${version}-setup.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+linux:
+  target:
+    - AppImage
+  category: Development
+  artifactName: ${name}-${version}.${ext}
+npmRebuild: false

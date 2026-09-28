@@ -1,0 +1,375 @@
+import { mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { electronApp, is, optimizer } from '@electron-toolkit/utils';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { createIPCHandler } from 'electron-trpc/main';
+import icon from '../../resources/icon.png?asset';
+import { scheduledManager, startScheduledTasks } from './agent/automation';
+import { startBbServer, stopBbServer } from './bb';
+import { mcpManager } from './agent/mcp/manager';
+import { runDream, startDreamScheduler } from './agent/memory';
+import { createCredentialStore } from './agent/providers/credential-store';
+import { firstEnabledModel, resolvePiModel } from './agent/providers/models';
+import { piStreamFn, refreshProviders, useCredentialStore } from './agent/providers/registry';
+import { Runner } from './agent/runtime/runner';
+import { refreshSkills } from './agent/skills/registry';
+import { appRouter } from './api/trpc/router';
+import { closeSessionRepository } from './conversation/store/repo';
+import { closeDb, openDb } from './db';
+import { registerFaviconScheme, serveFavicons } from './platform/favicons';
+import { setupMenuBar } from './platform/menu-bar';
+import { notifyScheduledRun } from './platform/notifications';
+import { loadShellEnv } from './platform/shell-env';
+import { updaterManager } from './platform/updater';
+import { getSettings, openSettings } from './settings/conf';
+import { attachWindowStatePersistence, getInitialWindowState } from './settings/window-state';
+import { drainWithin } from './utils/drain';
+import { createLogger, initLogging } from './utils/log';
+
+// Kept alive across hide/show so reopening from the Dock restores the exact
+// prior view instead of booting a fresh window. isQuitting lets the real quit
+// (Cmd+Q / before-quit) bypass the hide-on-close interception below.
+const log = createLogger('app');
+
+let mainWindow: BrowserWindow | null = null;
+let isQuitting = false;
+let installingUpdate = false;
+let quitReady = false;
+let closing: Promise<void> | undefined;
+
+// Privileged scheme registration has to happen before the app is ready.
+registerFaviconScheme();
+
+/** Ignores hash and query: a reload or a route change, not a link leading out.
+ *  `file:` URLs both report a null origin, so the path is what separates
+ *  the renderer's own document from any other file on disk. */
+function isSameDocument(target: string, current: string): boolean {
+  try {
+    const a = new URL(target);
+    const b = new URL(current);
+    return a.origin === b.origin && a.pathname === b.pathname;
+  } catch {
+    return false;
+  }
+}
+
+function createWindow(): BrowserWindow {
+  const initial = getInitialWindowState();
+  const win = new BrowserWindow({
+    width: initial.width,
+    height: initial.height,
+    minWidth: 880,
+    minHeight: 560,
+    show: false,
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 19, y: 18 },
+    backgroundColor: '#16161B',
+    ...(process.platform === 'linux' ? { icon } : {}),
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false,
+      // Chromium's built-in PDF viewer (used to preview PDF attachments in an
+      // iframe) needs plugins enabled.
+      plugins: true,
+    },
+  });
+
+  // Fullscreen is never restored; window-state.ts explains why.
+  if (initial.maximized) win.maximize();
+  attachWindowStatePersistence(win);
+
+  win.on('ready-to-show', () => {
+    win.show();
+  });
+
+  // On macOS the red traffic light hides the window rather than destroying it,
+  // keeping the renderer (route, scroll, in-flight state) alive so reopening
+  // from the Dock lands back on the previous page. The OS convention is for the
+  // app to stay resident until Cmd+Q.
+  win.on('close', (event) => {
+    if (process.platform === 'darwin' && !isQuitting) {
+      event.preventDefault();
+      // Hiding a window that's in a native fullscreen Space blacks out the
+      // screen — the empty Space lingers with nothing left to show. Leave
+      // fullscreen first and hide only once the (async) Space transition ends.
+      if (win.isFullScreen()) {
+        win.once('leave-full-screen', () => win.hide());
+        win.setFullScreen(false);
+      } else {
+        win.hide();
+      }
+    }
+  });
+
+  win.webContents.setWindowOpenHandler((details) => {
+    shell.openExternal(details.url);
+    return { action: 'deny' };
+  });
+
+  /**
+   * The window-open handler above only covers content asking for a *new*
+   * window; a link without `target` navigates this one instead, and there is no
+   * chrome here to come back from — the app would be stranded on a remote page
+   * with its own preload still attached. Electron fires this for the main frame
+   * only and never for hash-route changes, so the router and the PDF preview
+   * iframe are untouched; a dev-server reload lands on the same document and
+   * passes through.
+   */
+  win.webContents.on('will-navigate', (details) => {
+    if (isSameDocument(details.url, win.webContents.getURL())) return;
+    details.preventDefault();
+    shell.openExternal(details.url);
+  });
+
+  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
+    win.loadURL(process.env.ELECTRON_RENDERER_URL);
+  } else {
+    win.loadFile(join(__dirname, '../renderer/index.html'));
+  }
+
+  mainWindow = win;
+  return win;
+}
+
+// Held at module scope so before-quit can dispose it (kill background shells) —
+
+// Assigned once the runner exists inside whenReady; the quit path needs it.
+let runner: Runner | undefined;
+
+app.whenReady().then(async () => {
+  electronApp.setAppUserModelId('com.buckyball.bb-agent');
+  // Dev runs from the Electron binary, so the Dock shows its default icon until
+  // we set ours explicitly; packaged macOS builds already carry build/icon.icns.
+  if (process.platform === 'darwin') app.dock?.setIcon(icon);
+  initLogging();
+  serveFavicons();
+
+  const db = openDb();
+  // One store for the engine and the settings panel: an OAuth token is refreshed
+  // in place, and the store only serializes the writes that go through it.
+  const credentials = createCredentialStore(db);
+  useCredentialStore(credentials);
+  // The registry is built from what BB-Agent ships; the models the user added are
+  // only readable once the database is open.
+  refreshProviders(db);
+  openSettings();
+
+  // Fallback workspace root for conversations with no project; project-scoped
+  // threads run in their project's directory instead, resolved per request.
+  const defaultProjectRoot = join(homedir(), 'Documents', 'BB-Agent');
+  mkdirSync(defaultProjectRoot, { recursive: true });
+
+  // One composition root for every turn — the chat endpoint and the scheduler
+  // are both callers of it.
+  const runs = new Runner({ db, defaultProjectRoot });
+  runner = runs;
+
+  app.on('browser-window-created', (_, window) => {
+    optimizer.watchWindowShortcuts(window);
+  });
+
+  // Paint the window now. Everything slow or spawn-related below runs off the
+  // critical path, so first paint no longer waits on the login shell (seconds
+  // behind a heavy rc) or the skills scan.
+  const win = createWindow();
+  createIPCHandler({
+    router: appRouter,
+    windows: [win],
+    createContext: async () => ({ runner: runs }),
+  });
+
+  // Open BB-EDA (bbos/gui Tauri app) via shell.
+  // On Windows: starts the Tauri exe directly. On macOS/Linux: uses the registered URI scheme.
+  ipcMain.handle('bb:openEda', async () => {
+    if (process.platform === 'win32') {
+      // Look for bbos-gui.exe in the app bundle or on PATH.
+      // In dev, bbos/gui may not be packaged; fall back gracefully.
+      const guiExe = join(app.getAppPath(), 'bbos-gui.exe');
+      const { existsSync } = await import('node:fs');
+      if (existsSync(guiExe)) {
+        const { spawn } = await import('node:child_process');
+        spawn(guiExe, [], { detached: true, stdio: 'ignore' });
+      } else {
+        // Try launching via URI scheme as a fallback.
+        shell.openExternal('bbos-gui://');
+      }
+    } else {
+      shell.openExternal('bbos-gui://');
+    }
+  });
+
+  // Broadcast updater state into whichever main window is live (it survives
+  // hide/close, and getWindow() re-resolves after a rebuild). onBeforeInstall
+  // flips isQuitting so the hide-on-close handler lets the window close during
+  // the update relaunch instead of hiding it. Then start the post-launch check +
+  // periodic poll off the critical path.
+  updaterManager.init({
+    getWindow: () => mainWindow,
+    onBeforeInstall: () => {
+      isQuitting = true;
+      installingUpdate = true;
+    },
+  });
+  updaterManager.startAutoCheck();
+
+  // Resolve the user's login-shell environment in the background so PATH and
+  // their exported vars match the terminal. It can take seconds behind a slow
+  // rc, so nothing awaits it except the subprocess-spawning init below.
+  const shellEnvReady = loadShellEnv();
+
+  // Warm model metadata from the disk cache (falls back to the bundled
+  // snapshot), then let it refresh from the litellm catalog in the background.
+
+  // Connect configured MCP servers once the shell env is merged — stdio servers
+  // read PATH from process.env at spawn, so they must not start before it. A
+  // slow or failing server never blocks startup.
+  void shellEnvReady.then(() => mcpManager.init(db));
+
+  // Discover skills in the background, off the critical path. The scheduler
+  // (below) waits on this so a boot-time catch-up run still sees the full index;
+  // interactive turns already outlast the scan.
+  const skillsReady = refreshSkills();
+
+  // Background memory consolidation (dream) — runs off the conversation path,
+  // gated so it only fires for memory that has actually accumulated.
+  startDreamScheduler({
+    runDream,
+    model: () => {
+      try {
+        const sel = getSettings('general.defaultModel');
+        if (!sel) return null;
+        return {
+          model: resolvePiModel(db, sel.providerId, sel.modelId),
+          streamFn: piStreamFn,
+        };
+      } catch {
+        return null;
+      }
+    },
+  });
+
+  // Show (or, after a full quit cycle / non-macOS, rebuild) the main window.
+  // Hide-on-close keeps it alive, so the common path just re-shows it.
+  const showWindow = (): void => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+      return;
+    }
+    const next = createWindow();
+    createIPCHandler({
+      router: appRouter,
+      windows: [next],
+      createContext: async () => ({ runner: runs }),
+    });
+  };
+
+  // Scheduled tasks drive the same chat server headlessly. Start them once skills
+  // are discovered — the chat server is already listening, and gating on the scan
+  // keeps a boot-time catch-up run from firing before the skill index exists. Run
+  // even if discovery rejects (a failed scan must not strand the scheduler).
+  const startScheduler = (): void => {
+    startScheduledTasks({
+      db,
+      runner: runs,
+      runningThreadIds: runs.runningThreadIds,
+      defaultModel: () => {
+        // The renderer only persists general.defaultModel on an explicit pick, so
+        // it can be null even when the user has a working model — fall back to the
+        // first enabled one so a headless run isn't blocked on "no model".
+        try {
+          return getSettings('general.defaultModel') ?? firstEnabledModel(db);
+        } catch {
+          return null;
+        }
+      },
+      onComplete: (task, run) => {
+        notifyScheduledRun({
+          title: task.title,
+          threadId: task.threadId,
+          status: run.status,
+          onOpen: (threadId) => {
+            showWindow();
+            mainWindow?.webContents.send('scheduled:open-thread', threadId);
+          },
+        });
+      },
+    });
+  };
+  void skillsReady.then(startScheduler, startScheduler);
+
+  setupMenuBar({
+    showWindow,
+    newChat: () => {
+      showWindow();
+      mainWindow?.webContents.send('menu:new-chat');
+    },
+  });
+
+  // Start bb-server off the critical path. It is not on the hot path for
+  // interactive chat, and bbdev/mcp is already registered via stdio so the
+  // agent's tools work without bb-server running.
+  const bbBinary = join(app.getAppPath(), 'bb-server.exe');
+  void startBbServer(bbBinary).catch((err) => log.info(`bb-server: ${err.message}`));
+
+  app.on('activate', showWindow);
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+/**
+ * Quit in order: stop new work, let the live runs record how they ended, then
+ * close what they were writing to. Three seconds is the ceiling on that wait,
+ * not a promise that a tool ignoring cancellation has stopped — whatever is
+ * left unfinished is repaired on the next launch.
+ */
+async function shutdown(): Promise<void> {
+  const attempt = async (step: string, run: () => unknown) => {
+    try {
+      await run();
+    } catch (error) {
+      log.warn(`shutdown step ${step} failed: ${error}`);
+    }
+  };
+  await attempt('scheduled', () => scheduledManager.dispose());
+  await attempt('runner', () => drainWithin(runner?.dispose() ?? Promise.resolve(), 3000));
+  await attempt('bb-server', () => stopBbServer());
+  await attempt('mcp', () => mcpManager.dispose());
+  await attempt('updater', () => updaterManager.dispose());
+  await attempt('session-store', () => closeSessionRepository());
+  await attempt('db', () => closeDb());
+}
+
+/** The old best-effort teardown, for the one path that must not be held up. */
+function disposeImmediately(): void {
+  void closeSessionRepository().catch(() => {});
+  void runner?.dispose();
+  scheduledManager.dispose();
+  void mcpManager.dispose();
+  updaterManager.dispose();
+  stopBbServer();
+  closeDb();
+}
+
+app.on('before-quit', (event) => {
+  isQuitting = true;
+  // Squirrel drives its own quit and stalls if a listener defers it (see
+  // updater.install), so the update path keeps the synchronous teardown.
+  if (installingUpdate) {
+    disposeImmediately();
+    return;
+  }
+  if (quitReady) return;
+  event.preventDefault();
+  if (!closing) {
+    closing = shutdown().finally(() => {
+      quitReady = true;
+      app.quit();
+    });
+  }
+});

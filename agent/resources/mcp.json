@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "buckyball-dev": {
+      "command": "python",
+      "args": ["-u", "-m", "bbdev.mcp"],
+      "cwd": "d:/acode/buckyball",
+      "env": {}
+    }
+  }
+}

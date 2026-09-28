@@ -1,0 +1,241 @@
+import { randomUUID } from 'node:crypto';
+import type { Db } from '@main/db';
+import { subagents } from '@main/db/schema';
+import { Refusal } from '@main/utils/refusal';
+import { TOOL_NAMES, type ToolName } from '@shared/tools';
+import { eq } from 'drizzle-orm';
+import type { BbAgentTool } from '../tools/define';
+
+/**
+ * A subagent's definition: the system prompt it runs under and the slice of the
+ * parent's tools it may use. Built-ins live in code; user/AI ones come from the
+ * `subagents` table. Built-in vs custom is told apart by membership in
+ * BUILTIN_SUBAGENTS, not a field.
+ */
+export type SubagentDef = {
+  /** Unique identifier the parent delegates to (e.g. 'general-purpose'). */
+  name: string;
+  description: string;
+  systemPrompt: string;
+  /** Omitted = inherit all of the parent's tools (minus the always-denied set). */
+  toolAllow?: ToolName[];
+  toolDeny?: ToolName[];
+  /**
+   * Pin the subagent to a specific model — both must be set together (a model
+   * needs a provider + a model id). Omitted = inherit the parent's model.
+   */
+  providerId?: string;
+  modelId?: string;
+};
+
+/**
+ * Tools a subagent may never hold, whatever its allow-list says: `task` (no
+ * infinite nesting of subagents), `skill` (subagents aren't given the skill
+ * index, so it'd be dead), and `ask_clarification` (subagents run headless —
+ * there's no user to answer them). A Set<string> so a future tool can be denied
+ * before it's added to ToolName.
+ */
+export const SUBAGENT_DENIED_TOOLS = new Set<string>([
+  'task',
+  'skill',
+  'ask_clarification',
+  // A subagent has no business managing the user's scheduled automations.
+  'schedule_create',
+  'schedule_list',
+  'schedule_update',
+  'schedule_cancel',
+]);
+
+/** Narrow the parent's tools to what a subagent def permits. */
+export function filterToolsForSubagent(
+  parentTools: BbAgentTool[],
+  def: Pick<SubagentDef, 'toolAllow' | 'toolDeny'>,
+): BbAgentTool[] {
+  const allow = def.toolAllow ? new Set<string>(def.toolAllow) : null;
+  const deny = new Set<string>(def.toolDeny ?? []);
+  return parentTools.filter(
+    (tool) =>
+      !SUBAGENT_DENIED_TOOLS.has(tool.name) &&
+      (!allow || allow.has(tool.name)) &&
+      !deny.has(tool.name),
+  );
+}
+
+const GENERAL_PURPOSE: SubagentDef = {
+  name: 'general-purpose',
+  description:
+    'General-purpose agent for complex, multi-step tasks: searching across files, investigating questions that span many sources, and carrying out multi-step work in an isolated context. Delegate to it when a job needs several dependent steps or would otherwise flood the main conversation with intermediate detail.',
+  systemPrompt: `You are a subagent handling a task delegated by the main agent. Complete it fully and autonomously, then return a concise report — the main agent relays your result to the user, so it only needs the essentials, not a play-by-play.
+
+- Use the available tools to inspect real state; don't guess.
+- Be thorough but don't gold-plate, and don't leave the task half-done.
+- Do NOT ask for clarification — work with the information you were given.
+- Never create files unless they're necessary for the task; prefer editing an existing file over making a new one, and never create documentation or README files unless explicitly asked.
+- When finished, report what you did, the key findings, and any file paths or concrete results. Keep it tight.`,
+  // toolAllow omitted: inherits the parent's full toolset minus the denied set.
+};
+
+const DEEP_RESEARCH: SubagentDef = {
+  name: 'deep-research',
+  description:
+    'Researches a question with systematic, multi-angle web research and returns a well-sourced synthesis. Delegate any non-trivial "what is / explain / compare / investigate X" question, or research needed before writing a report — it gathers from many sources and returns only the distilled findings.',
+  systemPrompt: `You are a deep-research subagent. Given a research question, conduct systematic, multi-angle web research and return a well-sourced synthesis. Never answer from general knowledge alone, and never stop at a single search — depth and breadth determine the quality of your answer.
+
+Methodology:
+1. Broad exploration — survey the topic with a few wide web_search queries; from the results, identify the key dimensions and subtopics worth digging into.
+2. Deep dive — for each important dimension, run targeted searches with varied phrasings; web_fetch the most authoritative sources to read them in full, not just snippets.
+3. Diversity — deliberately seek different angles: hard facts and data, real examples and cases, expert opinion, trends, comparisons, and criticisms or limitations.
+4. Synthesis check — before answering, confirm you covered at least 3-5 angles, read the key sources in full, and have concrete data plus a balanced view. If not, keep researching.
+
+Use web_search to find sources and web_fetch to read the important ones. Use todo_write to track a multi-step research plan. For time-sensitive questions, use the actual current year (and month/day when "today/latest" is asked) in your queries — never a stale year.
+
+Return a clear synthesis with inline citations as [title](url), followed by a short Sources list. Report only the findings — the main agent relays them to the user.`,
+  toolAllow: ['web_search', 'web_fetch', 'read_file', 'todo_write'],
+};
+
+/** Built-in subagents, keyed by name. Code-only — never written to the DB. */
+export const BUILTIN_SUBAGENTS: Record<string, SubagentDef> = {
+  [GENERAL_PURPOSE.name]: GENERAL_PURPOSE,
+  [DEEP_RESEARCH.name]: DEEP_RESEARCH,
+};
+
+/**
+ * Resolve a subagent name to its definition: built-ins first (code), then the
+ * `subagents` table (user/AI-created) — same precedence as DeerFlow, so a
+ * built-in name can't be shadowed by a DB row.
+ */
+/**
+ * Every subagent the parent can delegate to right now — built-ins plus the
+ * user/AI-created rows — as name+description pairs. Used to advertise the
+ * choices in the task tool's description.
+ */
+export function listSubagentDefs(db: Db): Array<{ name: string; description: string }> {
+  const builtins = Object.values(BUILTIN_SUBAGENTS).map((s) => ({
+    name: s.name,
+    description: s.description,
+  }));
+  const custom = db
+    .select({ name: subagents.name, description: subagents.description })
+    .from(subagents)
+    .all();
+  return [...builtins, ...custom];
+}
+
+export function resolveSubagentDef(name: string, db: Db): SubagentDef | undefined {
+  const builtin = BUILTIN_SUBAGENTS[name];
+  if (builtin) return builtin;
+
+  const row = db.select().from(subagents).where(eq(subagents.name, name)).get();
+  if (!row) return undefined;
+  return {
+    name: row.name,
+    description: row.description,
+    systemPrompt: row.systemPrompt,
+    toolAllow: (row.toolAllow as ToolName[] | null) ?? undefined,
+    toolDeny: (row.toolDeny as ToolName[] | null) ?? undefined,
+    providerId: row.providerId ?? undefined,
+    modelId: row.modelId ?? undefined,
+  };
+}
+
+/**
+ * The settings list: built-ins first (read-only, id = name), then the rows the
+ * user or the AI defined. `builtin` is derived from where the entry came from,
+ * not stored, which is what keeps the two from ever disagreeing.
+ */
+export type SubagentView = {
+  id: string;
+  name: string;
+  description: string;
+  systemPrompt: string;
+  toolAllow: string[] | null;
+  toolDeny: string[] | null;
+  providerId: string | null;
+  modelId: string | null;
+  builtin: boolean;
+};
+
+export type SubagentInput = {
+  name: string;
+  description: string;
+  systemPrompt: string;
+  toolAllow: string[] | null;
+  toolDeny: string[] | null;
+  providerId: string | null;
+  modelId: string | null;
+};
+
+export function listSubagents(db: Db): SubagentView[] {
+  const builtins: SubagentView[] = Object.values(BUILTIN_SUBAGENTS).map((agent) => ({
+    id: agent.name,
+    name: agent.name,
+    description: agent.description,
+    systemPrompt: agent.systemPrompt,
+    toolAllow: agent.toolAllow ?? null,
+    toolDeny: agent.toolDeny ?? null,
+    providerId: agent.providerId ?? null,
+    modelId: agent.modelId ?? null,
+    builtin: true,
+  }));
+  const custom: SubagentView[] = db
+    .select()
+    .from(subagents)
+    .all()
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      systemPrompt: row.systemPrompt,
+      toolAllow: row.toolAllow as string[] | null,
+      toolDeny: row.toolDeny as string[] | null,
+      providerId: row.providerId,
+      modelId: row.modelId,
+      builtin: false,
+    }));
+  return [...builtins, ...custom];
+}
+
+/** Tools a custom subagent may be granted — everything minus the never-allowed set. */
+export const assignableTools = (): ToolName[] =>
+  TOOL_NAMES.filter((tool) => !SUBAGENT_DENIED_TOOLS.has(tool));
+
+export function createSubagent(db: Db, input: SubagentInput): string {
+  assertNameFree(db, input.name);
+  const id = randomUUID();
+  const now = new Date();
+  db.insert(subagents)
+    .values({ id, ...input, createdAt: now, updatedAt: now })
+    .run();
+  return id;
+}
+
+export function updateSubagent(db: Db, id: string, input: SubagentInput): void {
+  assertNameFree(db, input.name, id);
+  db.update(subagents)
+    .set({ ...input, updatedAt: new Date() })
+    .where(eq(subagents.id, id))
+    .run();
+}
+
+export function removeSubagent(db: Db, id: string): void {
+  db.delete(subagents).where(eq(subagents.id, id)).run();
+}
+
+/**
+ * A name has to resolve to one definition. `resolveSubagentDef` answers with
+ * the built-in first, so a custom row sharing its name would be unreachable
+ * rather than merely confusing.
+ */
+function assertNameFree(db: Db, name: string, excludeId?: string): void {
+  if (BUILTIN_SUBAGENTS[name]) {
+    throw new Refusal(`'${name}' is a built-in subagent name.`);
+  }
+  const existing = db
+    .select({ id: subagents.id })
+    .from(subagents)
+    .where(eq(subagents.name, name))
+    .get();
+  if (existing && existing.id !== excludeId) {
+    throw new Refusal(`A subagent named '${name}' already exists.`);
+  }
+}

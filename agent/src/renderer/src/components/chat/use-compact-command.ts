@@ -1,0 +1,62 @@
+import type { BbAgentUIMessage } from '@shared/chat';
+import { FoldVertical } from 'lucide-react';
+import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
+import { trpc } from '../../lib/trpc';
+import { useCompactionStore } from '../../state/compaction-store';
+import type { SelectedModel } from '../../state/model-store';
+import type { SlashCommand } from './composer/slash-menu';
+
+type CompactDeps = {
+  threadId: string;
+  model: SelectedModel | null;
+  setMessages: (messages: BbAgentUIMessage[]) => void;
+};
+
+/**
+ * The `/compact` command: summarize the thread's history into a checkpoint now,
+ * showing the live indicator (and disabling the composer) via the compaction
+ * store while it runs, then reload the persisted messages so the divider
+ * appears. A fresh read is forced past the global staleTime cache.
+ */
+export function useCompactCommand({ threadId, model, setMessages }: CompactDeps): SlashCommand {
+  const { t } = useTranslation();
+  const utils = trpc.useUtils();
+  const compact = trpc.chat.compact.useMutation();
+  // Stable across a streaming turn — a fresh object here makes the composer's
+  // `commands` array change every chunk, defeating its (and the pickers') memo.
+  return useMemo<SlashCommand>(
+    () => ({
+      name: 'Compact',
+      description: t('command.compactDesc'),
+      icon: FoldVertical,
+      run: () => {
+        if (!model || useCompactionStore.getState().active[threadId]) return;
+        void (async () => {
+          useCompactionStore.getState().setActive(threadId, true);
+          try {
+            await compact.mutateAsync({
+              threadId,
+              providerId: model.providerId,
+              modelId: model.modelId,
+            });
+            const fresh = await utils.threads.get.fetch({ id: threadId }, { staleTime: 0 });
+            if (fresh) {
+              setMessages(
+                fresh.messages.map((m) => ({
+                  id: m.id,
+                  role: m.role,
+                  parts: m.parts as BbAgentUIMessage['parts'],
+                  metadata: (m.metadata ?? undefined) as BbAgentUIMessage['metadata'],
+                })),
+              );
+            }
+          } finally {
+            useCompactionStore.getState().setActive(threadId, false);
+          }
+        })();
+      },
+    }),
+    [t, threadId, model, setMessages, utils, compact],
+  );
+}

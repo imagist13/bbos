@@ -1,0 +1,277 @@
+@import './tokens.css';
+@import 'tailwindcss';
+@import 'streamdown/styles.css';
+
+/* Let Tailwind scan Streamdown's compiled classes so its prose utilities exist. */
+@source '../../../../node_modules/streamdown/dist/*.js';
+
+/* Streamdown's code blocks switch via the `dark:` variant; bind it to our
+   [data-theme] scheme instead of the prefers-color-scheme default. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme inline {
+  /* shadcn-style semantic tokens Streamdown renders with, mapped onto ours so
+     its markdown follows the active theme automatically. */
+  --color-background: var(--bg-canvas);
+  --color-foreground: var(--fg-primary);
+  --color-muted: var(--bg-elevated);
+  --color-muted-foreground: var(--fg-tertiary);
+  --color-primary: var(--accent-default);
+  --color-primary-foreground: var(--fg-on-accent);
+  --color-border: var(--border-default);
+
+  --color-canvas: var(--bg-canvas);
+  --color-surface: var(--bg-surface);
+  --color-surface-strong: var(--bg-surface-strong);
+  --color-elevated: var(--bg-elevated);
+  --color-overlay: var(--bg-overlay);
+
+  --color-fg-primary: var(--fg-primary);
+  --color-fg-secondary: var(--fg-secondary);
+  --color-fg-tertiary: var(--fg-tertiary);
+  --color-fg-disabled: var(--fg-disabled);
+  --color-fg-on-accent: var(--fg-on-accent);
+
+  --color-border-default: var(--border-default);
+  --color-border-strong: var(--border-strong);
+  --color-border-focus: var(--border-focus);
+
+  --color-accent: var(--accent-default);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-active: var(--accent-active);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-alt: var(--accent-alt);
+  --color-accent-alt-soft: var(--accent-alt-soft);
+
+  --color-success: var(--status-success);
+  --color-warning: var(--status-warning);
+  --color-danger: var(--status-danger);
+  --color-info: var(--status-info);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+
+  /* Component-scoped tokens (theme-aware via tokens.css) */
+  --color-user-bubble-bg: var(--user-bubble-bg);
+  --color-user-bubble-fg: var(--user-bubble-fg);
+  --color-assist-text: var(--assist-text-fg);
+  --color-toolcall-bg: var(--toolcall-bg);
+  --color-toolcall-border: var(--toolcall-border);
+  --color-toolcall-accent: var(--toolcall-accent);
+  --color-composer-bg: var(--composer-bg);
+  --color-composer-border: var(--composer-border);
+  --color-code-bg: var(--code-bg);
+  --color-code-fg: var(--code-fg);
+  --color-sidebar-item-hover: var(--sidebar-item-hover);
+  --color-sidebar-item-active: var(--sidebar-item-active);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* Markdown (Streamdown) scope. Streamdown sizes everything with Tailwind's
+   text-* utilities, which read these --text-* tokens — redefining them here
+   scales the whole block down a notch without touching the rest of the app. */
+.bb-agent-md {
+  --text-xs: calc(0.7rem * var(--ui-scale));
+  --text-sm: calc(0.8rem * var(--ui-scale));
+  --text-base: calc(0.875rem * var(--ui-scale));
+  --text-lg: calc(1rem * var(--ui-scale));
+  --text-xl: calc(1.1rem * var(--ui-scale));
+  --text-2xl: calc(1.35rem * var(--ui-scale));
+  --text-3xl: calc(1.6rem * var(--ui-scale));
+}
+
+/* Streamdown defaults to list-inside; outside markers so wraps hang-indent. */
+.bb-agent-md :is(ul, ol) {
+  list-style-position: outside;
+  padding-left: 1.5rem;
+}
+
+/* macOS hiddenInset titleBar drag region — keeps traffic lights from overlapping content */
+.bb-agent-titlebar {
+  -webkit-app-region: drag;
+  height: 36px;
+  flex-shrink: 0;
+}
+
+.bb-agent-titlebar button,
+.bb-agent-titlebar a,
+.bb-agent-titlebar input {
+  -webkit-app-region: no-drag;
+}
+
+/* Reusable drag / no-drag utilities so any header row can become a drag
+   handle (Codex-style full-width top strip), while interactive children
+   opt back out. */
+.app-drag {
+  -webkit-app-region: drag;
+}
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-canvas);
+  color: var(--fg-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--font-mono);
+}
+
+/* Scrollbars — the standard scrollbar-color/-width properties (NOT the webkit
+   ::-webkit-scrollbar pseudo-elements). The webkit ones force an always-visible,
+   space-taking custom scrollbar; the standard ones only tint + thin the native
+   overlay scrollbar, so it still auto-hides and takes no layout space. Inherited,
+   so declaring on html cascades everywhere; the [data-theme] rule re-resolves the
+   thumb token for any subtree that overrides the theme. */
+html {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: thin;
+}
+[data-theme] {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* Keyframe, not a transition, so the height reveal fires reliably on mount. */
+@keyframes plan-enter {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.plan-enter {
+  grid-template-rows: 1fr;
+  animation: plan-enter var(--duration-slow) var(--ease-out);
+}
+
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.toast-enter {
+  animation: toast-enter var(--duration-normal) var(--ease-out);
+}
+
+/* Radix Collapsible height transition. Radix measures the content and exposes
+   it as --radix-collapsible-content-height; we animate from/to it. Keep padding
+   on an inner element, not on the .bb-agent-collapsible node — overflow:hidden
+   here clips during the slide, and padding at height:0 would jump. */
+@keyframes bb-agent-collapsible-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+  }
+}
+@keyframes bb-agent-collapsible-up {
+  from {
+    height: var(--radix-collapsible-content-height);
+  }
+  to {
+    height: 0;
+  }
+}
+.bb-agent-collapsible {
+  overflow: hidden;
+}
+.bb-agent-collapsible[data-state='open'] {
+  animation: bb-agent-collapsible-down var(--duration-normal) var(--ease-out);
+}
+.bb-agent-collapsible[data-state='closed'] {
+  animation: bb-agent-collapsible-up var(--duration-normal) var(--ease-out);
+}
+
+/* Monochrome "thinking"-style text shimmer: a brighter band sweeps across the
+   muted label while compacting. Theme-aware via the fg tokens; no accent color. */
+@keyframes compaction-shimmer {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+.compaction-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--fg-tertiary) 0%,
+    var(--fg-tertiary) 40%,
+    var(--fg-primary) 50%,
+    var(--fg-tertiary) 60%,
+    var(--fg-tertiary) 100%
+  );
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: compaction-shimmer 2s linear infinite;
+}
+
+/* Tiptap composer — a plain-text editing surface (no block formatting). The
+   placeholder is rendered by the Placeholder extension via data-placeholder. */
+.tiptap {
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tiptap p {
+  margin: 0;
+}
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--fg-disabled);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+/* While dragging the sidebar divider, kill text selection and force the resize
+   cursor everywhere — the drag travels over selectable chat content, whose
+   own user-select:text would otherwise win over a body-level style. */
+.resizing,
+.resizing * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  cursor: col-resize !important;
+}

@@ -1,0 +1,39 @@
+node_modules
+out
+dist
+build/release
+.DS_Store
+*.log*
+*.tsbuildinfo
+
+# TanStack Router auto-generated route tree
+src/renderer/src/routeTree.gen.ts
+
+# design/ is a local-only collaboration scratchpad
+# (tokens.css lives in src/renderer/src/assets/, not here)
+design/
+
+# local dev db (drizzle-kit studio / push target)
+dev.db
+dev.db-journal
+dev.db-shm
+dev.db-wal
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# dev perf-repro fixture — a captured real conversation, kept local (not shared)
+src/renderer/src/lib/dev/real-message.json
+
+# IDE
+.idea
+*.swp
+.tanstack
+.playwright-mcp
+
+# claude code: skills are shared, local state (worktrees etc.) is not
+.claude/*
+!.claude/skills/
+docs/product/*

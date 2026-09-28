@@ -1,0 +1,157 @@
+import { isImageToolOutput, type ToolResultImage } from './chat-types';
+
+/** Typed loosely on purpose: fixtures and persisted rows are shaped like a
+ *  UIMessage without being one. */
+type UIMessageLike = { parts: readonly { type: string }[] };
+
+/**
+ * Flattens a UIMessage's parts into one sequence a consumer can reduce over,
+ * absorbing the shape variance: three tool-output encodings, tool parts that
+ * merge call and result, error results carried in a separate field. Consumers
+ * (currently the markdown copy/export) read NormalizedPart instead of
+ * re-implementing the dispatch.
+ *
+ * A tool part that already has its result yields two parts — a `tool-call`
+ * then a `tool-result` — so call and result are always separate entries.
+ */
+
+export type NormalizedToolOutput = {
+  /** The output's textual payload, unwrapped from its wire encoding. */
+  text: string;
+  /** Inline images/files the output carried; base64 never leaks into `text`. */
+  images: ToolResultImage[];
+  error?: boolean;
+};
+
+export type NormalizedPart =
+  | { kind: 'text'; text: string }
+  | { kind: 'reasoning'; text: string }
+  | { kind: 'tool-call'; name: string; input: unknown }
+  | { kind: 'tool-result'; name: string; output: NormalizedToolOutput }
+  | { kind: 'file'; mediaType?: string; url?: string; filename?: string };
+
+/** JSON-stringify arbitrary content for size/transcript purposes; never throws. */
+export function stringifyUnknown(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '';
+  }
+}
+
+type LooseObject = Record<string, unknown>;
+
+/**
+ * Unwrap a tool output into text plus inline images. Handles every encoding a
+ * result reaches us in: the wire ToolResultOutput variants ('text', 'json',
+ * 'error-text', 'error-json', 'content', 'execution-denied'), the structured
+ * { text, images } object our image-bearing tools return (which 'json' wraps
+ * after message conversion), and plain strings/objects from UI tool parts.
+ */
+export function normalizeToolOutput(output: unknown): NormalizedToolOutput {
+  if (output == null) return { text: '', images: [] };
+  if (typeof output !== 'object') return { text: String(output), images: [] };
+  if (isImageToolOutput(output)) return { text: output.text, images: output.images };
+  const o = output as LooseObject;
+  switch (o.type) {
+    case 'json':
+      return normalizeToolOutput(o.value);
+    case 'text':
+      return { text: String(o.value ?? ''), images: [] };
+    case 'error-text':
+      return { text: String(o.value ?? ''), images: [], error: true };
+    case 'error-json':
+      return { text: stringifyUnknown(o.value), images: [], error: true };
+    case 'execution-denied':
+      return {
+        text: typeof o.reason === 'string' ? o.reason : 'Tool execution denied.',
+        images: [],
+        error: true,
+      };
+    case 'content':
+      if (Array.isArray(o.value)) return normalizeContentEntries(o.value as LooseObject[]);
+      break;
+  }
+  return { text: stringifyUnknown(output), images: [] };
+}
+
+/**
+ * Flatten a 'content'-type output: text entries join the text, everything else
+ * (media / file-data / file-url / file-id) becomes an image entry — media
+ * attachments are overwhelmingly images here, and callers that only need a
+ * size signal count entries rather than inspect them.
+ */
+function normalizeContentEntries(entries: LooseObject[]): NormalizedToolOutput {
+  const texts: string[] = [];
+  const images: ToolResultImage[] = [];
+  for (const entry of entries) {
+    if (typeof entry.text === 'string') {
+      texts.push(entry.text);
+    } else {
+      const mediaType = typeof entry.mediaType === 'string' ? entry.mediaType : '';
+      const data = typeof entry.data === 'string' ? entry.data : undefined;
+      const url = typeof entry.url === 'string' ? entry.url : undefined;
+      images.push({
+        mediaType,
+        dataUrl: url ?? (data != null ? `data:${mediaType};base64,${data}` : ''),
+        filename: typeof entry.filename === 'string' ? entry.filename : undefined,
+      });
+    }
+  }
+  return { text: texts.join('\n'), images };
+}
+
+/** Normalized conversation content of a message. */
+export function normalizedParts(msg: UIMessageLike): NormalizedPart[] {
+  return fromUIParts(msg.parts);
+}
+
+function fromUIParts(parts: UIMessageLike['parts']): NormalizedPart[] {
+  const out: NormalizedPart[] = [];
+  // Defensive ?? []: persisted rows and test fixtures can lack the field.
+  for (const raw of parts ?? []) {
+    const part = raw as { type: string } & Record<string, unknown>;
+    if (part.type === 'text') {
+      out.push({ kind: 'text', text: String(part.text ?? '') });
+    } else if (part.type === 'reasoning') {
+      out.push({ kind: 'reasoning', text: String(part.text ?? '') });
+    } else if (part.type === 'file') {
+      out.push({
+        kind: 'file',
+        mediaType: part.mediaType as string | undefined,
+        url: part.url as string | undefined,
+        filename: part.filename as string | undefined,
+      });
+    } else if (part.type.startsWith('tool-') || part.type === 'dynamic-tool') {
+      const name =
+        part.type === 'dynamic-tool'
+          ? String(part.toolName ?? '')
+          : part.type.slice('tool-'.length);
+      out.push({ kind: 'tool-call', name, input: part.input });
+      // Presence-checked rather than state-gated: loosely-shaped parts (fixtures,
+      // mock threads) carry an output without the state machine fields.
+      if (part.output !== undefined) {
+        out.push({ kind: 'tool-result', name, output: normalizeToolOutput(part.output) });
+      } else if (part.state === 'output-error') {
+        out.push({
+          kind: 'tool-result',
+          name,
+          output: { text: String(part.errorText ?? ''), images: [], error: true },
+        });
+      }
+    }
+    // step-start carries no content.
+  }
+  return out;
+}
+
+/** Concatenated plain text of a message's text parts. */
+export function textOfMessage(msg: UIMessageLike, separator = ''): string {
+  return normalizedParts(msg)
+    .filter((p) => p.kind === 'text')
+    .map((p) => p.text)
+    .join(separator)
+    .trim();
+}

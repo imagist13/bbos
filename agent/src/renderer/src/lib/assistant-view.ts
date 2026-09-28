@@ -1,0 +1,273 @@
+import type { BbAgentUIMessage } from '@shared/chat';
+import {
+  type Clarify,
+  type ClarifyQuestion,
+  type ClarifyResult,
+  isImageToolOutput,
+  type Subagent,
+  type SubagentStatus,
+  type Tool,
+  type ToolResultImage,
+  type ToolStatus,
+  type TraceSegment,
+} from '@shared/chat-types';
+import type { BbAgentTools } from '@shared/tools';
+import {
+  type DynamicToolUIPart,
+  getStaticToolName,
+  isStaticToolUIPart,
+  type ToolUIPart,
+} from '@shared/ui-message';
+import type { TFunction } from 'i18next';
+import { type MarkerToolName, TOOL_PRESENTATION, type ToolInput } from './tool-presentation';
+
+/**
+ * An assistant turn split for the Codex-style render: `thinking` is the
+ * reasoning (its own "Thought" disclosure), `trace` is the work — tool calls
+ * plus the narrative between them — under "Worked …", and `final` is the
+ * concluding answer.
+ */
+/** A clarification card. Carries its render state so it can sit inline in the
+ *  turn's flow (a resolved card before the reply it prompted, a pending card at
+ *  the end) instead of being hoisted out of order. */
+export type ClarifySegment = {
+  kind: 'clarify';
+  clarify: Clarify;
+  /** No answer yet — render the interactive card; otherwise show the result. */
+  pending: boolean;
+  result?: ClarifyResult;
+};
+
+/** An image shown inline, from a file part on the message. Clicking it opens
+ *  the full attachment viewer. */
+export type ImageSegment = {
+  kind: 'image';
+  id: string;
+  url: string;
+  mediaType: string;
+  filename?: string;
+  /** A tool screenshot (computer/browser), not a generated deliverable. */
+  fromTool?: boolean;
+  /** Folded — its image lives on the step's tool marker; only the latest tool
+   *  screenshot renders inline. */
+  collapsed?: boolean;
+};
+
+/** Trace segments as the renderer sees them — the shared clarify variant
+ *  swapped for one carrying the answer state, plus inline images. */
+export type ViewSegment =
+  | Exclude<TraceSegment, { kind: 'clarify' }>
+  | ClarifySegment
+  | ImageSegment;
+
+export type AssistantView = {
+  thinking: ViewSegment[];
+  trace: ViewSegment[];
+  final: ViewSegment[];
+  toolCount: number;
+};
+
+export function buildAssistantView(parts: BbAgentUIMessage['parts'], t: TFunction): AssistantView {
+  const thinking: ViewSegment[] = [];
+  const work: ViewSegment[] = []; // non-reasoning: narrative + tools + clarify, in order
+  let lastToolIdx = -1;
+  let toolCount = 0;
+  let seq = 0;
+
+  for (const part of parts) {
+    if (part.type === 'reasoning') {
+      const content = part.text.trim();
+      if (content === '') continue;
+      thinking.push({ kind: 'narrative', id: `s${seq++}`, content });
+    } else if (part.type === 'text') {
+      const content = part.text.trim();
+      if (content === '') continue;
+      work.push({ kind: 'narrative', id: `s${seq++}`, content });
+    } else if (part.type === 'file' && part.mediaType.startsWith('image/')) {
+      // Images the agent produced render inline as the deliverable. Not a tool,
+      // so it doesn't advance lastToolIdx — it trails the generating tool and
+      // lands in `final`, shown prominently.
+      work.push({
+        kind: 'image',
+        id: `s${seq++}`,
+        url: part.url,
+        mediaType: part.mediaType,
+        filename: part.filename,
+      });
+    } else if (isStaticToolUIPart(part)) {
+      const name = getStaticToolName<BbAgentTools>(part);
+      // A tool awaiting approval shows in the composer's approval card, not the
+      // inline trace; it resolves to a normal marker here once approved/denied.
+      if (part.state === 'approval-requested') continue;
+      // The plan tool isn't trace work — it renders in the composer plan panel.
+      if (name === 'todo_write') continue;
+      // ask_clarification keeps its place in the flow but isn't a trace tool —
+      // don't advance lastToolIdx (so a pending card stays in `final`, visible)
+      // or count it toward the tool tally.
+      if (name === 'ask_clarification') {
+        const v = toClarifySegment(part);
+        if (v) work.push(v);
+        continue;
+      }
+      lastToolIdx = work.length;
+      toolCount++;
+      // A task call is a delegated subagent — render it as a nested card whose
+      // live body the card pulls from the subagent store; everything else is a
+      // flat tool marker.
+      if (name === 'task') work.push({ kind: 'subagent', subagent: toSubagentModel(part) });
+      else work.push({ kind: 'tool', tool: toToolModel(part, name, t) });
+      pushToolImages(part);
+    } else if (part.type === 'dynamic-tool') {
+      // An external agent's or MCP server's tool call — arbitrary name, rendered
+      // generically by its kind (the part.toolName) + the agent-supplied title.
+      lastToolIdx = work.length;
+      toolCount++;
+      work.push({ kind: 'tool', tool: toDynamicToolModel(part, t) });
+      pushToolImages(part);
+    }
+  }
+
+  // Images a tool returned (a browser screenshot, a viewed file) render inline
+  // like generated images: trailing the marker, in `final` unless work continues.
+  function pushToolImages(part: BbAgentToolPart | DynamicToolUIPart): void {
+    if (part.state !== 'output-available' || !isImageToolOutput(part.output)) return;
+    for (const img of part.output.images) {
+      work.push({
+        kind: 'image',
+        id: `s${seq++}`,
+        url: img.dataUrl,
+        mediaType: img.mediaType,
+        filename: img.filename,
+        fromTool: true,
+      });
+    }
+  }
+
+  // Only the latest tool screenshot renders inline; fold the earlier ones — each
+  // is still reachable by expanding that step's tool marker (which carries it).
+  const toolShots = work.filter(
+    (s): s is ImageSegment => s.kind === 'image' && s.fromTool === true,
+  );
+  for (const shot of toolShots.slice(0, -1)) shot.collapsed = true;
+
+  // The answer is the work's trailing text after the last tool call (or all of
+  // it when no tool ran); everything up to the last tool is process.
+  const trace = work.slice(0, lastToolIdx + 1);
+  const final = work.slice(lastToolIdx + 1);
+  return { thinking, trace, final, toolCount };
+}
+
+/**
+ * Map an ask_clarification call to a clarify segment. The model supplies the
+ * questions as the tool input (no ids — we key by position); once answered, the
+ * tool output carries the result for the read-only view. Skipped while the
+ * input is still streaming, since the questions aren't complete yet.
+ */
+function toClarifySegment(part: BbAgentToolPart): ViewSegment | null {
+  if (part.state === 'input-streaming') return null;
+  // A question that failed or was cut off shows what happened, not a form to fill in.
+  if (part.state === 'output-error') {
+    return { kind: 'narrative', id: `clarify-${part.toolCallId}`, content: part.errorText };
+  }
+  const input = (part.input ?? {}) as { questions?: Omit<ClarifyQuestion, 'id'>[] };
+  const questions = (input.questions ?? []).map((q, i) => ({ ...q, id: String(i) }));
+  if (questions.length === 0) return null;
+  return {
+    kind: 'clarify',
+    clarify: { id: part.toolCallId, questions },
+    pending: part.state === 'input-available',
+    result: part.state === 'output-available' ? (part.output as ClarifyResult) : undefined,
+  };
+}
+
+type BbAgentToolPart = ToolUIPart<BbAgentTools>;
+
+function toToolModel(part: BbAgentToolPart, name: MarkerToolName, t: TFunction): Tool {
+  const input = (part.input ?? {}) as ToolInput;
+  const status = toStatus(part);
+  // The static-part check only proves the part is `tool-*`; the NAME is a cast,
+  // not a guarantee — a model can hallucinate a tool that doesn't exist (the
+  // call already failed server-side). Render it generically instead of crashing.
+  const p = TOOL_PRESENTATION[name] as (typeof TOOL_PRESENTATION)[MarkerToolName] | undefined;
+  if (!p) {
+    return { id: part.toolCallId, name, verb: '', target: name, status, output: toOutput(part) };
+  }
+  return {
+    id: part.toolCallId,
+    name,
+    // Present continuous while it runs ("Reading"), past tense once settled ("Read").
+    verb: t(status === 'running' ? p.verbActiveKey : p.verbKey),
+    target: p.target(input, t),
+    status,
+    typeLabel: p.typeLabel(input, t),
+    command: p.command?.(input),
+    output: toOutput(part),
+    screenshot: toolScreenshot(part),
+  };
+}
+
+/** The first result screenshot of a tool call, carried on the marker so it can
+ *  be revealed on expand once its inline copy has been folded away. */
+function toolScreenshot(part: BbAgentToolPart | DynamicToolUIPart): ToolResultImage | undefined {
+  if (part.state !== 'output-available' || !isImageToolOutput(part.output)) return undefined;
+  return part.output.images[0];
+}
+
+/**
+ * A task call rendered as a subagent card. Only id/name/status come from the
+ * part; the tool list (body + count) is pulled live by the card from the
+ * subagent store, since the subagent's own tool calls are never in the message.
+ */
+function toSubagentModel(part: BbAgentToolPart): Subagent {
+  const input = (part.input ?? {}) as ToolInput;
+  return {
+    id: part.toolCallId,
+    name: input.description ?? input.subagent ?? 'Subagent',
+    status: toSubagentStatus(part),
+    result: part.state === 'output-available' ? String(part.output) : undefined,
+  };
+}
+
+function toDynamicToolModel(part: DynamicToolUIPart, t: TFunction): Tool {
+  return {
+    id: part.toolCallId,
+    name: part.toolName,
+    verb: '',
+    target: part.title ?? part.toolName,
+    status: toStatus(part),
+    typeLabel: t('tool.type.agent', { name: part.toolName }),
+    output: toOutput(part),
+    screenshot: toolScreenshot(part),
+  };
+}
+
+function toSubagentStatus(part: BbAgentToolPart): SubagentStatus {
+  switch (part.state) {
+    case 'output-available':
+      return 'done';
+    case 'output-error':
+      return 'failed';
+    default:
+      return 'streaming';
+  }
+}
+
+function toStatus(part: BbAgentToolPart | DynamicToolUIPart): ToolStatus {
+  switch (part.state) {
+    case 'output-available':
+      return 'success';
+    case 'output-error':
+      return 'error';
+    default:
+      return 'running';
+  }
+}
+
+function toOutput(part: BbAgentToolPart | DynamicToolUIPart): string | undefined {
+  if (part.state === 'output-error') return part.errorText;
+  if (part.state !== 'output-available') return undefined;
+  // Structured image outputs expand to their text — the images render as their
+  // own segments, and stringifying the object would dump base64 into the row.
+  if (isImageToolOutput(part.output)) return part.output.text || undefined;
+  return String(part.output);
+}

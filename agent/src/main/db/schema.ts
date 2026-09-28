@@ -1,0 +1,218 @@
+import { PERMISSION_MODES } from '@shared/permissions';
+import { sql } from 'drizzle-orm';
+import { blob, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+
+const timestamp = () =>
+  integer({ mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`);
+
+export const threads = sqliteTable('threads', {
+  id: text().primaryKey(),
+  title: text(),
+  projectId: text('project_id'),
+  metadata: text({ mode: 'json' }),
+  /** Model this thread is bound to; both null = inherit general.defaultModel.
+   *  Mirrors the (provider_id, model_id) pair on subagents / scheduled tasks. */
+  modelProviderId: text('model_provider_id'),
+  modelId: text('model_id'),
+  createdAt: timestamp(),
+  updatedAt: timestamp(),
+  /** When the user last viewed this thread; null = never (treated as read).
+   *  A thread is "unread" in the sidebar when updatedAt is newer than this. */
+  lastReadAt: integer('last_read_at', { mode: 'timestamp_ms' }),
+  /** When the user archived this thread; null = active. Archived threads drop
+   *  out of the sidebar list but stay openable by id and keep their messages. */
+  archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
+  /** When the user deleted this thread; null = not deleted. The row and its
+   *  conversation stay: what a call cost has to outlive the chat it was spent
+   *  on, and the spend is recorded against this thread's session. Nothing above
+   *  the store ever sees a deleted thread. */
+  deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),
+  /** Pinned to the top of the sidebar; the Pinned section mixes pinned threads
+   *  and pinned projects. */
+  pinned: integer({ mode: 'boolean' }).notNull().default(false),
+  /** The pi session holding this thread's conversation. Null until the thread
+   *  runs for the first time — the session is created with the first turn, so
+   *  a thread nobody ever wrote to costs nothing. */
+  sessionId: text('session_id'),
+});
+
+/**
+ * A user-added project: a directory used as the workspace root for its threads.
+ * Threads reference it via threads.project_id with NO foreign key — delete and
+ * archive fan out to the project's threads explicitly in the router, so SQLite
+ * never has to rebuild the table to add an FK to an existing column. pinned
+ * shares the sidebar's Pinned section with threads; archivedAt mirrors threads.
+ */
+export const projects = sqliteTable('projects', {
+  id: text().primaryKey(),
+  path: text().notNull().unique(),
+  name: text().notNull(),
+  pinned: integer({ mode: 'boolean' }).notNull().default(false),
+  archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
+  createdAt: timestamp(),
+});
+
+export const artifacts = sqliteTable('artifacts', {
+  id: text().primaryKey(),
+  threadId: text('thread_id')
+    .notNull()
+    .references(() => threads.id, { onDelete: 'cascade' }),
+  messageId: text('message_id'),
+  type: text({
+    enum: ['html', 'code', 'markdown', 'image', 'diff', 'data'],
+  }).notNull(),
+  name: text().notNull(),
+  body: text().notNull(),
+  mime: text(),
+  createdAt: timestamp(),
+});
+
+/**
+ * One row per provider the user has added — having a row is what "added"
+ * means, so removing one is how a provider leaves the list. Holds only what
+ * the user chose: the enabled flag, non-secret config (endpoint override,
+ * picked models, models and providers they defined) and encrypted credentials.
+ * Display copy lives in `agent/providers/manifest.ts`, and what a provider
+ * serves comes from a catalog rather than from here.
+ */
+export const providers = sqliteTable('providers', {
+  id: text().primaryKey(),
+  enabled: integer({ mode: 'boolean' }).notNull().default(false),
+  config: text({ mode: 'json' }),
+  /** safeStorage-encrypted JSON; null when no credentials are stored. */
+  credentialsEncrypted: blob('credentials_encrypted', { mode: 'buffer' }),
+  updatedAt: timestamp(),
+});
+
+/**
+ * User-defined and AI-created subagents. Built-in subagents (general-purpose,
+ * deep-research) live in code and are never stored here — this table holds only
+ * the ones the user adds or the agent creates via createSubAgent. `name` is the
+ * unique identifier the parent delegates to; it must not collide with a built-in
+ * (built-in vs custom is told apart by membership in the code's built-in map, so
+ * no column tracks it). null toolAllow/toolDeny = inherit the parent's tools. A
+ * model is identified by a (providerId, modelId) pair — set both to pin this
+ * subagent to a specific model, or leave both null to inherit the parent's.
+ */
+export const subagents = sqliteTable('subagents', {
+  id: text().primaryKey(),
+  name: text().notNull().unique(),
+  description: text().notNull(),
+  systemPrompt: text().notNull(),
+  toolAllow: text({ mode: 'json' }),
+  toolDeny: text({ mode: 'json' }),
+  providerId: text('provider_id'),
+  modelId: text('model_id'),
+  createdAt: timestamp(),
+  updatedAt: timestamp(),
+});
+
+/**
+ * One row per MCP (Model Context Protocol) server the user configures. BB-Agent
+ * connects to these as an MCP client and merges their tools into the agent's
+ * toolset, namespaced `mcp__<server>__<tool>`. Non-secret config (transport,
+ * command/args/url, non-secret env and headers) lives in `config`; secret env
+ * vars, headers and tokens are safeStorage-encrypted in `credentialsEncrypted`.
+ * `name` is the unique, user-visible identifier that also seeds the namespace.
+ */
+export const mcpServers = sqliteTable('mcp_servers', {
+  id: text().primaryKey(),
+  name: text().notNull().unique(),
+  enabled: integer({ mode: 'boolean' }).notNull().default(false),
+  /** Provisioned by a feature (e.g. the browser), not the user: shown read-only
+   *  in the MCP list and not editable/deletable/exportable. */
+  managed: integer({ mode: 'boolean' }).notNull().default(false),
+  transport: text({ enum: ['stdio', 'http', 'sse'] }).notNull(),
+  config: text({ mode: 'json' }),
+  /** safeStorage-encrypted JSON; null when no credentials are stored. */
+  credentialsEncrypted: blob('credentials_encrypted', { mode: 'buffer' }),
+  /** safeStorage-encrypted OAuth state (DCR client info + tokens); kept apart
+   *  from credentials so editing config can't clobber the tokens. */
+  oauthEncrypted: blob('oauth_encrypted', { mode: 'buffer' }),
+  createdAt: timestamp(),
+  updatedAt: timestamp(),
+});
+
+/**
+ * A user's scheduled task — the *definition* only. A `once` task carries `runAt`
+ * and disables itself after firing; a `recurring` task carries a 5-field
+ * `cronExpr`. `providerId`/`modelId` null = inherit the globally selected model.
+ * Times fire in `timezone` (IANA). The in-memory croner jobs are rebuilt from
+ * these rows on every boot, so a restart never loses a task.
+ *
+ * Deliberately holds no run state: next-run is computed from the cron expression,
+ * and last-run / status / consecutive-failures are derived from `scheduledTaskRuns`
+ * (the single source of truth) — nothing here can drift from the run history.
+ * `enabled` is the one piece of non-derivable state (the user's toggle, and the
+ * flag auto-pause / one-shot consumption flip off).
+ *
+ * Each task binds to one `threadId` (created with the task): every firing appends
+ * a turn to that same conversation rather than spawning a fresh thread, so the
+ * task reads as an ongoing dialogue. No foreign key — deleting the bound thread
+ * leaves the task pointing at a gone conversation, which the UI renders as such.
+ */
+export const scheduledTasks = sqliteTable('scheduled_tasks', {
+  id: text().primaryKey(),
+  title: text().notNull(),
+  prompt: text().notNull(),
+  threadId: text('thread_id'),
+  kind: text({ enum: ['recurring', 'once'] }).notNull(),
+  cronExpr: text('cron_expr'),
+  runAt: integer('run_at', { mode: 'timestamp_ms' }),
+  timezone: text().notNull(),
+  enabled: integer({ mode: 'boolean' }).notNull().default(true),
+  /** Workspace root for the run's thread; null = the projectless fallback. */
+  projectId: text('project_id'),
+  providerId: text('provider_id'),
+  modelId: text('model_id'),
+  permissionMode: text('permission_mode', { enum: PERMISSION_MODES })
+    .notNull()
+    .default('full-access'),
+  /** What to do with an occurrence missed while the app was closed: fire once
+   *  when we next boot/wake, or skip it and wait for the next occurrence. */
+  catchUpPolicy: text('catch_up_policy', { enum: ['fire_once', 'skip'] })
+    .notNull()
+    .default('fire_once'),
+  createdAt: timestamp(),
+  updatedAt: timestamp(),
+});
+
+/**
+ * One row per scheduled-task firing — the run history shown in the task detail
+ * panel. The conversation lives on the task (`scheduledTasks.threadId`); a run
+ * records only which assistant message it produced (`messageId`, best-effort,
+ * null when the run failed before one existed) so "Previous runs" can jump to
+ * that turn inside the bound thread.
+ */
+export const scheduledTaskRuns = sqliteTable(
+  'scheduled_task_runs',
+  {
+    id: text().primaryKey(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => scheduledTasks.id, { onDelete: 'cascade' }),
+    messageId: text('message_id'),
+    status: text({ enum: ['running', 'ok', 'error', 'skipped', 'interrupted'] }).notNull(),
+    error: text(),
+    startedAt: timestamp(),
+    finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
+  },
+  (table) => [index('scheduled_task_runs_task_idx').on(table.taskId, table.startedAt)],
+);
+
+export type Thread = typeof threads.$inferSelect;
+export type NewThread = typeof threads.$inferInsert;
+export type Project = typeof projects.$inferSelect;
+export type NewProject = typeof projects.$inferInsert;
+export type Artifact = typeof artifacts.$inferSelect;
+export type NewArtifact = typeof artifacts.$inferInsert;
+export type Provider = typeof providers.$inferSelect;
+export type NewProvider = typeof providers.$inferInsert;
+export type Subagent = typeof subagents.$inferSelect;
+export type NewSubagent = typeof subagents.$inferInsert;
+export type McpServerRow = typeof mcpServers.$inferSelect;
+export type NewMcpServerRow = typeof mcpServers.$inferInsert;
+export type ScheduledTask = typeof scheduledTasks.$inferSelect;
+export type NewScheduledTask = typeof scheduledTasks.$inferInsert;
+export type ScheduledTaskRun = typeof scheduledTaskRuns.$inferSelect;
+export type NewScheduledTaskRun = typeof scheduledTaskRuns.$inferInsert;

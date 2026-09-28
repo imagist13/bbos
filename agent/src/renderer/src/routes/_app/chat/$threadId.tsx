@@ -1,0 +1,260 @@
+import type { BbAgentUIMessage } from '@shared/chat';
+import type { ClarifyResult } from '@shared/chat-types';
+import { sealDanglingToolCalls } from '@shared/seal-tool-calls';
+import { createFileRoute } from '@tanstack/react-router';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import { ChatThread } from '../../../components/chat/ChatThread';
+import type { Attachment } from '../../../components/chat/composer/AttachmentChip';
+import { useCompactCommand } from '../../../components/chat/use-compact-command';
+import { getThreadChat } from '../../../lib/pi-chat/chats';
+import type { PiChat } from '../../../lib/pi-chat/store';
+import { usePiChat } from '../../../lib/pi-chat/use-pi-chat';
+import { getActivePlan } from '../../../lib/plan';
+import { trpc } from '../../../lib/trpc';
+import { useApprovals } from '../../../lib/use-approvals';
+import { useChatModel } from '../../../lib/use-chat-model';
+import { useCompactionStore } from '../../../state/compaction-store';
+import { type SelectedModel, useModelStore } from '../../../state/model-store';
+import { usePendingInput } from '../../../state/pending-input-store';
+import { toast } from '../../../state/toast-store';
+
+export const Route = createFileRoute('/_app/chat/$threadId')({
+  component: ChatView,
+});
+
+const showError = (error: unknown): void => {
+  toast.error(error instanceof Error ? error.message : String(error));
+};
+
+/** Composer attachments → file parts for sendMessage. */
+function toFileParts(attachments: Attachment[]) {
+  return attachments.map((a) => ({
+    type: 'file' as const,
+    filename: a.name,
+    mediaType: a.mediaType,
+    url: a.url,
+  }));
+}
+
+function ChatView(): React.JSX.Element {
+  const { t } = useTranslation();
+  const { threadId } = Route.useParams();
+  const thread = trpc.threads.get.useQuery({ id: threadId });
+  const { selected } = useChatModel(threadId);
+
+  if (thread.isLoading) {
+    return <Centered>{t('common.loading')}</Centered>;
+  }
+  if (!thread.data) {
+    return <Centered>{t('chat.notFound')}</Centered>;
+  }
+
+  const initialMessages: BbAgentUIMessage[] = thread.data.messages.map((m) => ({
+    id: m.id,
+    role: m.role,
+    parts: m.parts as BbAgentUIMessage['parts'],
+    metadata: (m.metadata ?? undefined) as BbAgentUIMessage['metadata'],
+  }));
+
+  return (
+    <ChatRunner
+      key={threadId}
+      threadId={threadId}
+      projectId={thread.data.projectId}
+      title={thread.data.title ?? t('common.untitledChat')}
+      initialMessages={initialMessages}
+      model={selected}
+    />
+  );
+}
+
+function ChatRunner({
+  threadId,
+  projectId,
+  title,
+  initialMessages,
+  model,
+}: {
+  threadId: string;
+  projectId: string | null;
+  title: string;
+  initialMessages: BbAgentUIMessage[];
+  model: SelectedModel | null;
+}): React.JSX.Element {
+  // The chat persists across thread switches (see pi-chat/chats). Resolve it once
+  // per mount via a ref guard — not useMemo, whose factory StrictMode may
+  // double-invoke and flip `isNew` to false. initialMessages only seeds a
+  // brand-new Chat; an existing one keeps its in-memory state. ChatRunner is
+  // keyed on threadId, so each thread gets its own fresh ref.
+  const resolved = useRef<{ chat: PiChat; resume: boolean } | null>(null);
+  if (resolved.current === null) {
+    const { chat, isNew } = getThreadChat(threadId, { messages: initialMessages });
+    // Resume only reconnects to a PRE-EXISTING run (e.g. reload mid-stream). A
+    // brand-new thread is about to auto-send its draft below; resuming there
+    // would attach a second consumer to that same run and double its content.
+    // Decide once at mount (stable across re-renders) — a reused Chat never
+    // resumes (it still holds its original stream).
+    const willAutoSend = usePendingInput.getState().draft !== null;
+    resolved.current = { chat, resume: isNew && !willAutoSend };
+  }
+  const { chat, resume } = resolved.current;
+
+  const {
+    messages,
+    sendMessage,
+    setMessages,
+    status,
+    addToolOutput,
+    addToolApprovalResponse,
+    stop,
+    error,
+  } = usePiChat(chat, { resume });
+
+  // Stopping goes through the server, and the run's stream delivers its last
+  // events before the chat settles. Calls the run never got to start stay open
+  // in this in-memory view — persistence seals them in the DB — so they are
+  // sealed here too, or they would spin as "running" until a reseed.
+  const onStop = useCallback((): void => {
+    stop().then(() => setMessages(sealDanglingToolCalls), showError);
+  }, [stop, setMessages]);
+
+  // Dismissing a question tells the run waiting on it; the run ends its turn.
+  const onCancelClarify = useCallback(
+    (toolCallId: string): void => {
+      const output: ClarifyResult = { answers: [], cancelled: true };
+      addToolOutput({ tool: 'ask_clarification', toolCallId, output }).catch(showError);
+    },
+    [addToolOutput],
+  );
+
+  const utils = trpc.useUtils();
+  const compactCommand = useCompactCommand({ threadId, model, setMessages });
+  const { approvals, onApprove, onAlways, onDeny } = useApprovals({
+    messages,
+    addToolApprovalResponse,
+  });
+
+  const markRead = trpc.threads.markRead.useMutation({
+    onSuccess: () => utils.threads.list.invalidate(),
+  });
+
+  // Mark read on open (clears this thread's unread dot in the sidebar).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: markRead.mutate is stable; fire on thread change
+  useEffect(() => {
+    markRead.mutate({ id: threadId });
+  }, [threadId]);
+
+  // When a turn completes: refresh the persisted-message cache (so a later
+  // rebuild seeds from current DB state), clear the running spinner promptly,
+  // and mark read again — the active thread should never show its own unread dot.
+  const wasStreaming = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: markRead.mutate is stable
+  useEffect(() => {
+    const streaming = status === 'submitted' || status === 'streaming';
+    // Surface the sidebar spinner promptly instead of waiting for the next poll.
+    if (streaming && !wasStreaming.current) utils.threads.running.invalidate();
+    if (wasStreaming.current && !streaming) {
+      // threads.get/list also carry a model-generated title: on a fast turn the
+      // stream can close before the title's data-title part is emitted, so this
+      // turn-end refetch is the fallback (the title is already persisted).
+      utils.threads.get.invalidate({ id: threadId });
+      utils.threads.list.invalidate();
+      utils.threads.running.invalidate();
+      markRead.mutate({ id: threadId });
+      // Safety net: clear the indicator if a 'done' event was missed (errored
+      // or aborted mid-compaction) — the turn is over, so it can't be compacting.
+      useCompactionStore.getState().setActive(threadId, false);
+    }
+    wasStreaming.current = streaming;
+  }, [status, threadId, utils]);
+
+  // Auto-send the home draft once the model is ready. Wait for `model` so a
+  // not-yet-hydrated selection doesn't drop the draft; the ref guards against
+  // re-sending when model changes.
+  const sentRef = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sendMessage is stable; fire when model becomes ready
+  useEffect(() => {
+    if (sentRef.current || !model) return;
+    // Guarantee the transport has this thread's model before the first send —
+    // publishing effects elsewhere may not have run yet on a fresh mount.
+    useModelStore.getState().setForThread(threadId, model);
+    const draft = usePendingInput.getState().consume();
+    if (draft) {
+      const files = toFileParts(draft.attachments);
+      sendMessage({ text: draft.text, ...(files.length > 0 && { files }) });
+    }
+    sentRef.current = true;
+  }, [model]);
+
+  const commands = useMemo(() => [compactCommand], [compactCommand]);
+  const onSend = useCallback(
+    (text: string, attachments: Attachment[]) => {
+      if (!model) return;
+      const files = toFileParts(attachments);
+      sendMessage({ text, ...(files.length > 0 && { files }) });
+    },
+    [model, sendMessage],
+  );
+
+  // Read the live message list off a ref so onEditMessage stays referentially
+  // stable (it can't depend on `messages`, which changes every stream chunk) —
+  // that keeps UserMessage's memo intact through a streaming turn.
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const rewind = trpc.messages.rewind.useMutation();
+  const onEditMessage = useCallback(
+    async (messageId: string, text: string): Promise<void> => {
+      if (!model) return;
+      const current = messagesRef.current;
+      const index = current.findIndex((m) => m.id === messageId);
+      if (index === -1) return;
+      // The edited message keeps its attachments; only its text is rewritten.
+      const files = current[index].parts.filter((p) => p.type === 'file');
+      // Rewind before re-sending: the server rebuilds history from its own
+      // store (the client sends only the latest message), so the conversation
+      // has to stop at the edited message first or the re-run replays the stale
+      // tail. The messages after it are kept, just no longer on the branch.
+      await rewind.mutateAsync({ threadId, messageId });
+      setMessages((prev) => prev.slice(0, index));
+      sendMessage({ text, ...(files.length > 0 && { files }) });
+    },
+    [model, threadId, rewind, setMessages, sendMessage],
+  );
+  const onClarify = useCallback(
+    (toolCallId: string, result: ClarifyResult) => {
+      addToolOutput({ tool: 'ask_clarification', toolCallId, output: result }).catch(showError);
+    },
+    [addToolOutput],
+  );
+
+  return (
+    <ChatThread
+      threadId={threadId}
+      projectId={projectId}
+      title={title}
+      messages={messages}
+      status={status}
+      error={error}
+      plan={getActivePlan(messages)}
+      approvals={approvals}
+      commands={commands}
+      onSend={onSend}
+      onEditMessage={onEditMessage}
+      onApprove={onApprove}
+      onAlways={onAlways}
+      onDeny={onDeny}
+      onClarify={onClarify}
+      onCancelClarify={onCancelClarify}
+      onStop={onStop}
+    />
+  );
+}
+
+function Centered({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return (
+    <div className="flex h-full items-center justify-center px-6 text-fg-tertiary text-sm">
+      {children}
+    </div>
+  );
+}
