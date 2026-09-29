@@ -184,7 +184,7 @@ export const Sidebar = memo(function Sidebar(): React.JSX.Element {
         <SbNavItem
           icon={<ExternalLink className="size-[15px] shrink-0" />}
           label={t('sidebar.openEda')}
-          onClick={() => window.bb.openEda()}
+          onClick={() => navigate({ to: '/eda' })}
         />
       </nav>
 

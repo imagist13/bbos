@@ -1,4 +1,5 @@
 import { chatRouter } from './routers/chat';
+import { edaRouter } from './routers/eda';
 import { mcpRouter } from './routers/mcp';
 import { memoryRouter } from './routers/memory';
 import { messagesRouter } from './routers/messages';
@@ -25,6 +26,7 @@ import { router } from './trpc';
  */
 export const appRouter = router({
   chat: chatRouter,
+  eda: edaRouter,
   threads: threadsRouter,
   messages: messagesRouter,
   models: modelsRouter,
