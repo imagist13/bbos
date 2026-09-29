@@ -125,11 +125,13 @@
   --bg-elevated:       #FFFFFF;
   --bg-overlay:        rgba(0, 0, 0, 0.40);
 
-  /* Foreground (text, icons) */
-  --fg-primary:   #37352F;
-  --fg-secondary: #5A5A55;
-  --fg-tertiary:  #9B9A95;
-  --fg-disabled:  #B0AFAA;
+  /* Foreground (text, icons) — 加深一档,Light Salon 之前 fg-tertiary #9B9A95
+     在 #FBFBFA 背景上只有 ~3:1 对比度,在小字号下读着糊。现在四级 token 都
+     至少 5:1,primary 接近纯黑 */
+  --fg-primary:   #1A1A17;
+  --fg-secondary: #2E2D2A;
+  --fg-tertiary:  #5C5B57;
+  --fg-disabled:  #878680;
   --fg-on-accent: #FFFFFF;
   --fg-link:      var(--accent-default);
 
@@ -211,11 +213,12 @@
   --bg-elevated:       #2E2E34;
   --bg-overlay:        rgba(0, 0, 0, 0.65);
 
-  /* Foreground */
+  /* Foreground — primary 保持纯白(对比度优先);secondary / tertiary / disabled
+     都下沉一档,避免在 dark surface 上看起来"灰蒙蒙、像褪色了" */
   --fg-primary:   #FAFAFA;
-  --fg-secondary: #E4E4E7;
-  --fg-tertiary:  #A1A1AA;
-  --fg-disabled:  #71717A;
+  --fg-secondary: #C4C4C8;
+  --fg-tertiary:  #888892;
+  --fg-disabled:  #5C5C66;
   --fg-on-accent: #FFFFFF;
   --fg-link:      var(--accent-default);
 
