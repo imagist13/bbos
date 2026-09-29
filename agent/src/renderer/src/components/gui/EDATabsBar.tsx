@@ -2,7 +2,7 @@
  * EDATabsBar —— 顶部打开的文件 tab。
  */
 
-import { Plus, X, FileText } from 'lucide-react';
+import { FileText, Plus, X } from 'lucide-react';
 
 import type { FileKind as _FileKind, OpenFile } from './types';
 
@@ -14,15 +14,23 @@ function FileKindIcon({ kind: _kind }: { kind: _FileKind }): React.JSX.Element {
 interface Props {
   files: OpenFile[];
   activeId: string;
+  dirtyPaths: Set<string>;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
 }
 
-export function EDATabsBar({ files, activeId, onSelect, onClose }: Props): React.JSX.Element {
+export function EDATabsBar({
+  files,
+  activeId,
+  dirtyPaths,
+  onSelect,
+  onClose,
+}: Props): React.JSX.Element {
   return (
     <div className="flex h-9 flex-shrink-0 items-center overflow-x-auto border-border-default border-b bg-surface">
       {files.map((f) => {
         const isActive = f.id === activeId;
+        const isDirty = dirtyPaths.has(f.id);
         return (
           <div
             key={f.id}
@@ -37,9 +45,7 @@ export function EDATabsBar({ files, activeId, onSelect, onClose }: Props): React
             }}
             className={[
               'group flex h-full cursor-pointer items-center gap-2 border-border-default border-r px-3 text-xs',
-              isActive
-                ? 'bg-canvas text-fg-primary'
-                : 'text-fg-tertiary hover:bg-surface-strong',
+              isActive ? 'bg-canvas text-fg-primary' : 'text-fg-tertiary hover:bg-surface-strong',
             ].join(' ')}
             style={{
               borderTop: isActive ? '2px solid hsl(var(--accent))' : '2px solid transparent',
@@ -47,7 +53,9 @@ export function EDATabsBar({ files, activeId, onSelect, onClose }: Props): React
           >
             <FileKindIcon kind={f.kind} />
             <span className="whitespace-nowrap">{f.name}</span>
-            {f.dirty && <span className="size-1.5 rounded-full bg-accent" />}
+            {isDirty && (
+              <span title="unsaved changes" className="size-1.5 rounded-full bg-accent" />
+            )}
             <button
               type="button"
               onClick={(e) => {

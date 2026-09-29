@@ -1,13 +1,16 @@
 /**
  * SchematicEditor —— 基于 reactflow 的原理图编辑器。
  *
- * 节点 / 边都来自 mockData 里的 toy 拓扑:
- *   host → gemmini / relu / trace → mxfp2int → axi → host
+ * 交互:
+ *   - 节点可拖拽改变位置
+ *   - 从一个节点的 source Handle 拖到另一个节点的 target Handle 创建新边
+ *   - 选中边后按 Delete(或点边上的 × 按钮)删除
+ *   - 顶部 "Reset" 按钮恢复初始拓扑
  *
- * 节点类型目前只有一种 `ballNode`;后续如果需要 host / ip 区分,
- * 在这里再加 case。配色全部用 agent 的 design tokens。
+ * 配色全部使用 agent 的 design tokens。
  */
 
+import { useCallback, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -15,11 +18,17 @@ import {
   MiniMap,
   Handle,
   Position,
+  useNodesState,
+  useEdgesState,
+  addEdge,
   type Node,
   type Edge,
   type NodeProps,
+  type Connection,
+  type NodeChange,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { RotateCcw, X } from 'lucide-react';
 
 type NodeKind = 'host' | 'ball' | 'ip';
 
@@ -68,7 +77,7 @@ function BallNode({ data, selected }: NodeProps<BallNodeData>): React.JSX.Elemen
 
 const NODE_TYPES = { ballNode: BallNode };
 
-const NODES: Node<BallNodeData>[] = [
+const INITIAL_NODES: Node<BallNodeData>[] = [
   {
     id: 'host',
     type: 'ballNode',
@@ -107,7 +116,7 @@ const NODES: Node<BallNodeData>[] = [
   },
 ];
 
-const EDGES: Edge[] = [
+const INITIAL_EDGES: Edge[] = [
   { id: 'e1', source: 'host', target: 'ball-gemmini', label: 'exec' },
   { id: 'e2', source: 'host', target: 'ball-relu', label: 'exec' },
   { id: 'e3', source: 'host', target: 'ball-trace', label: 'exec' },
@@ -118,19 +127,92 @@ const EDGES: Edge[] = [
 ];
 
 export function SchematicEditor(): React.JSX.Element {
+  const [nodes, , onNodesChange] = useNodesState<BallNodeData>(INITIAL_NODES);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(INITIAL_EDGES);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+
+  const onConnect = useCallback(
+    (conn: Connection) =>
+      setEdges((eds) =>
+        addEdge({ ...conn, id: `e${Date.now()}`, label: 'link' }, eds),
+      ),
+    [setEdges],
+  );
+
+  const resetAll = useCallback(() => {
+    setEdges(INITIAL_EDGES);
+    setSelectedEdgeId(null);
+    // useNodesState 没暴露 setNodes,这里通过 onNodesChange 给每个节点
+    // 派一个 'position' change 把坐标写回,reactflow 内部会刷新位置。
+    const changes: NodeChange[] = INITIAL_NODES.map((n) => ({
+      id: n.id,
+      type: 'position',
+      position: n.position,
+    }));
+    onNodesChange(changes);
+  }, [setEdges, onNodesChange]);
+
   return (
-    <div className="h-full">
-      <ReactFlow
-        nodes={NODES}
-        edges={EDGES}
-        nodeTypes={NODE_TYPES}
-        fitView
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background gap={16} />
-        <Controls position="bottom-left" />
-        <MiniMap pannable zoomable position="bottom-right" />
-      </ReactFlow>
+    <div className="flex h-full flex-col">
+      <div className="flex h-9 flex-shrink-0 items-center justify-between border-border-default border-b bg-surface px-3 text-fg-tertiary text-xs">
+        <div className="flex items-center gap-3">
+          <span>toy.canvas</span>
+          <span className="text-fg-disabled">|</span>
+          <span>
+            {nodes.length} nodes · {edges.length} edges
+          </span>
+          {selectedEdgeId && (
+            <>
+              <span className="text-fg-disabled">|</span>
+              <span className="text-accent">edge {selectedEdgeId} selected</span>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={resetAll}
+            className="flex h-6 items-center gap-1 rounded px-2 text-fg-secondary hover:bg-surface-strong hover:text-fg-primary"
+          >
+            <RotateCcw className="size-[11px]" />
+            Reset
+          </button>
+          {selectedEdgeId && (
+            <button
+              type="button"
+              onClick={() => {
+                setEdges((eds) => eds.filter((e) => e.id !== selectedEdgeId));
+                setSelectedEdgeId(null);
+              }}
+              className="flex h-6 items-center gap-1 rounded bg-status-danger/10 px-2 text-status-danger hover:bg-status-danger/20"
+            >
+              <X className="size-[11px]" />
+              Delete edge
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="flex-1">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={NODE_TYPES}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onEdgeClick={(_, e) => setSelectedEdgeId(e.id)}
+          onPaneClick={() => setSelectedEdgeId(null)}
+          fitView
+          nodesDraggable
+          nodesConnectable
+          elementsSelectable
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background gap={16} />
+          <Controls position="bottom-left" />
+          <MiniMap pannable zoomable position="bottom-right" />
+        </ReactFlow>
+      </div>
     </div>
   );
 }

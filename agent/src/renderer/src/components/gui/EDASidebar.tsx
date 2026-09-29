@@ -5,8 +5,17 @@
  * 样式只使用 agent 的 design tokens。
  */
 
+import {
+  ChevronRight,
+  FileText,
+  Folder,
+  FolderInput,
+  FolderOpen,
+  Plus,
+  Save,
+  Search,
+} from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
-import { ChevronRight, Folder, FolderOpen, Plus, Save, Search, FileText, FolderInput } from 'lucide-react';
 
 import type { FileKind, TreeNode } from './types';
 
@@ -18,6 +27,9 @@ interface Props {
   onOpenFile: (node: TreeNode) => void;
   onPickWorkspace: () => void;
   onClearWorkspace: () => void;
+  onSave: () => void;
+  canSave: boolean;
+  isSaving: boolean;
   activeFileId: string | null;
 }
 
@@ -111,6 +123,9 @@ export function EDASidebar({
   onOpenFile,
   onPickWorkspace,
   onClearWorkspace,
+  onSave,
+  canSave,
+  isSaving,
   activeFileId,
 }: Props): React.JSX.Element {
   const initialOpen = useMemo(() => new Set<string>(), []);
@@ -140,7 +155,9 @@ export function EDASidebar({
           <button
             type="button"
             aria-label="Save"
-            className="flex h-5 w-5 items-center justify-center rounded text-fg-tertiary hover:bg-surface-strong hover:text-fg-primary"
+            onClick={onSave}
+            disabled={!canSave || isSaving}
+            className="flex h-5 w-5 items-center justify-center rounded text-fg-tertiary hover:bg-surface-strong hover:text-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Save className="size-[11px]" />
           </button>

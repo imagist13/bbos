@@ -14,7 +14,7 @@
  */
 
 import { BrowserWindow, dialog, type OpenDialogOptions } from 'electron';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 
@@ -129,8 +129,92 @@ export const edaRouter = router({
       }
       return { path: input.path, content: text, kind };
     }),
+
+  /**
+   * 开始监听一个 workspace 目录的文件变化。同一时间只有一个 active watcher;
+   * 重复调用会替换之前的。
+   */
+  startWatching: publicProcedure
+    .input(z.object({ path: z.string().min(1) }))
+    .mutation(({ input }) => {
+      if (activeWatcher) {
+        activeWatcher.watcher.close();
+        activeWatcher = null;
+      }
+      let stat;
+      try {
+        stat = statSync(input.path);
+      } catch {
+        throw badRequest(`Path not found: ${input.path}`);
+      }
+      if (!stat.isDirectory()) throw badRequest(`Not a directory: ${input.path}`);
+
+      const watcher = watch(
+        input.path,
+        { recursive: true },
+        (eventType, filename) => {
+          // filename 在不同平台 / Node 版本下可能是 string | Buffer | null。
+          if (!filename) return;
+          const name = typeof filename === 'string' ? filename : String(filename);
+          broadcastFsEvent({
+            type: eventType === 'rename' ? 'rename' : 'change',
+            path: join(input.path, name),
+          });
+        },
+      );
+      watcher.on('error', (err) => {
+        // 监听失败时不抛(已经订阅了),只打 log;前端不需感知。
+        // eslint-disable-next-line no-console
+        console.warn('[eda] watcher error:', err);
+      });
+      activeWatcher = { root: input.path, watcher };
+      return { watching: true, root: input.path };
+    }),
+
+  /** 停止当前 workspace 的 watcher(若有)。 */
+  stopWatching: publicProcedure.mutation(() => {
+    if (activeWatcher) {
+      activeWatcher.watcher.close();
+      activeWatcher = null;
+    }
+    return { watching: false };
+  }),
+
+  /** 写 utf8 文本内容,扩展名必须落在支持集内。 */
+  writeFile: publicProcedure
+    .input(z.object({ path: z.string().min(1), content: z.string() }))
+    .mutation(({ input }) => {
+      const kind = extKind(input.path);
+      if (!kind) {
+        throw badRequest(
+          `Unsupported extension. Supported: ${SUPPORTED_EXTS.join(', ')}`,
+        );
+      }
+      try {
+        writeFileSync(input.path, input.content, 'utf8');
+      } catch (err) {
+        throw badRequest(`Failed to write ${input.path}: ${(err as Error).message}`);
+      }
+      return { ok: true, path: input.path };
+    }),
 });
 
 // Re-export for convenience so other modules can use the FileKind type
 // without reaching into this file's internals.
 export type { FileKind, TreeNode };
+
+/* -------------------------------------------------------------------------- */
+/*  File watcher                                                              */
+/* -------------------------------------------------------------------------- */
+
+// 一个进程只有一个当前 workspace 的 watcher;切换 workspace 时关掉旧的。
+let activeWatcher: { root: string; watcher: FSWatcher } | null = null;
+const FS_EVENT_CHANNEL = 'eda:fs-event';
+
+function broadcastFsEvent(payload: { type: 'change' | 'rename'; path: string }): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send(FS_EVENT_CHANNEL, payload);
+    }
+  }
+}

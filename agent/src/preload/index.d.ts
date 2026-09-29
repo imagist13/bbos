@@ -7,6 +7,13 @@ declare global {
     bb: {
       /** Open the BB-EDA GUI (bbos/gui Tauri app) in a separate window. */
       openEda: () => Promise<void>;
+      /**
+       * Subscribe to file-system change events emitted by the EDA workbench
+       * watcher. Returns an unsubscribe function.
+       */
+      onEdaFsEvent: (
+        callback: (ev: { type: 'change' | 'rename'; path: string }) => void,
+      ) => () => void;
     };
     api: unknown;
   }
