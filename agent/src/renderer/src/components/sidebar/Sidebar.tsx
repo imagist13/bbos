@@ -1,20 +1,15 @@
 import { Link, useNavigate } from '@tanstack/react-router';
-import { CalendarClock, ExternalLink, FolderPlus, Search, Settings, SquarePen } from 'lucide-react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CalendarClock, ExternalLink, Search, Settings, SquarePen } from 'lucide-react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { dropThreadChat } from '../../lib/pi-chat/chats';
 import { trpc } from '../../lib/trpc';
 import { useCommandPalette } from '../../state/command-palette-store';
 import { useSidebarStore } from '../../state/sidebar-store';
 import { useUpdateStore } from '../../state/update-store';
-import { ProjectRow } from './ProjectRow';
-import { SbIconButton, SbNavItem, SbSection } from './primitives';
+import { SbNavItem, SbSection } from './primitives';
 import { ThreadRow, useThreadRowActions } from './ThreadRow';
-import type { ProjectItem, ThreadItem } from './types';
-
-// Stable empty list so a project with no threads keeps a referentially-constant
-// `threads` prop across renders, letting the memoized ProjectRow bail out.
-const EMPTY_THREADS: ThreadItem[] = [];
+import type { ThreadItem } from './types';
 
 export const Sidebar = memo(function Sidebar(): React.JSX.Element {
   const { t } = useTranslation();
@@ -28,7 +23,6 @@ export const Sidebar = memo(function Sidebar(): React.JSX.Element {
     updateStage === 'available' || updateStage === 'downloading' || updateStage === 'downloaded';
   const utils = trpc.useUtils();
   const { data: threads, isLoading } = trpc.threads.list.useQuery();
-  const { data: projects } = trpc.projects.list.useQuery();
   // Poll the main process for which threads are generating; a small id list, so
   // the interval is cheap (unlike polling message content).
   const { data: running } = trpc.threads.running.useQuery(undefined, { refetchInterval: 2000 });
@@ -44,30 +38,10 @@ export const Sidebar = memo(function Sidebar(): React.JSX.Element {
     [scheduled],
   );
 
-  // Adding a project is a sidebar-level action (the Projects header button), not
-  // tied to any one row, so it lives here; per-project actions live in ProjectMenu.
-  const pickDirectory = trpc.projects.pickDirectory.useMutation();
-  const addProject = trpc.projects.add.useMutation({
-    onSuccess: () => utils.projects.list.invalidate(),
-  });
-  const onAddProject = async (): Promise<void> => {
-    const path = await pickDirectory.mutateAsync();
-    if (path) addProject.mutate({ path });
-  };
-
-  // Collapse state is held centrally so it survives a project moving between the
-  // Pinned and Projects sections (which remounts the row) on pin/unpin.
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const toggleCollapse = useCallback(
-    (id: string): void =>
-      setCollapsed((prev) => {
-        const next = new Set(prev);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      }),
-    [],
-  );
+  // BB agent:每个对话都挂在 buckyball 项目下,所以侧栏只显示 BB 项目下的
+  // threads。没有 project 选择 / 切换 / 增删的概念 —— 这些入口在通用
+  // agent 里才有。`ensureBb` 内部幂等,挂载时调一次拿到当前 BB 项目 id。
+  const bbProject = trpc.projects.ensureBb.useQuery();
 
   // A background run (a scheduled task) has no client mounted to refresh views
   // when it starts or finishes. Watch the polled running set: for every thread
@@ -92,59 +66,22 @@ export const Sidebar = memo(function Sidebar(): React.JSX.Element {
     utils.threads.list.invalidate();
   }, [running, utils]);
 
-  // Bucket threads once per data change instead of re-filtering the whole list
-  // per project on every render. A pinned thread always floats to the Pinned
-  // section as a standalone row, so project / chat lists only ever render their
-  // own non-pinned threads.
-  const { pinnedThreads, pinnedProjects, openProjects, looseThreads, threadsByProject } =
-    useMemo(() => {
-      const allThreads = threads ?? [];
-      const allProjects = projects ?? [];
-      const byProject = new Map<string, ThreadItem[]>();
-      const loose: ThreadItem[] = [];
-      for (const th of allThreads) {
-        if (th.pinned) continue;
-        if (th.projectId == null) loose.push(th);
-        else {
-          const bucket = byProject.get(th.projectId);
-          if (bucket) bucket.push(th);
-          else byProject.set(th.projectId, [th]);
-        }
-      }
-      return {
-        pinnedThreads: allThreads.filter((th) => th.pinned),
-        pinnedProjects: allProjects.filter((p) => p.pinned),
-        openProjects: allProjects.filter((p) => !p.pinned),
-        looseThreads: loose,
-        threadsByProject: byProject,
-      };
-    }, [threads, projects]);
-  const hasPinned = pinnedThreads.length > 0 || pinnedProjects.length > 0;
+  // BB agent 没有"通用对话",侧栏只展示当前 BB 项目下的 threads。旧项目
+  // 下残留的 thread 暂时不显示(用户可以从 url 直接打开,或清理掉旧数据)。
+  const bbThreads = useMemo(() => {
+    const bbId = bbProject.data?.id;
+    if (!bbId) return threads ?? [];
+    return (threads ?? []).filter((th) => th.projectId === bbId);
+  }, [threads, bbProject.data]);
 
-  const renderThread = useCallback(
-    (thread: ThreadItem): React.JSX.Element => (
-      <ThreadRow
-        key={thread.id}
-        thread={thread}
-        running={runningSet.has(thread.id)}
-        hasSchedule={scheduledThreadIds.has(thread.id)}
-        actions={rowActions}
-      />
-    ),
-    [runningSet, scheduledThreadIds, rowActions],
-  );
-  const renderProject = useCallback(
-    (project: ProjectItem): React.JSX.Element => (
-      <ProjectRow
-        key={project.id}
-        project={project}
-        expanded={!collapsed.has(project.id)}
-        onToggle={toggleCollapse}
-        threads={threadsByProject.get(project.id) ?? EMPTY_THREADS}
-        renderThread={renderThread}
-      />
-    ),
-    [collapsed, toggleCollapse, threadsByProject, renderThread],
+  const renderThread = (thread: ThreadItem): React.JSX.Element => (
+    <ThreadRow
+      key={thread.id}
+      thread={thread}
+      running={runningSet.has(thread.id)}
+      hasSchedule={scheduledThreadIds.has(thread.id)}
+      actions={rowActions}
+    />
   );
 
   return (
@@ -200,44 +137,11 @@ export const Sidebar = memo(function Sidebar(): React.JSX.Element {
           <div className="px-3 py-1.5 text-fg-disabled text-sm">{t('common.loading')}</div>
         ) : (
           <>
-            {hasPinned && (
-              <>
-                <SbSection label={t('sidebar.pinned')} />
-                <div className="flex flex-col gap-1">
-                  {pinnedProjects.map(renderProject)}
-                  {pinnedThreads.map(renderThread)}
-                </div>
-              </>
-            )}
-
-            <SbSection
-              label={t('sidebar.projects')}
-              hoverActions={
-                <SbIconButton
-                  title={t('sidebar.addProject')}
-                  icon={<FolderPlus className="size-[13px]" />}
-                  onClick={onAddProject}
-                />
-              }
-            />
-            {openProjects.length > 0 && (
-              <div className="flex flex-col gap-1">{openProjects.map(renderProject)}</div>
-            )}
-
-            <SbSection
-              label={t('sidebar.chats')}
-              hoverActions={
-                <SbIconButton
-                  title={t('home.newChat')}
-                  icon={<SquarePen className="size-[13px]" />}
-                  onClick={() => navigate({ to: '/' })}
-                />
-              }
-            />
-            {looseThreads.length === 0 ? (
+            <SbSection label={t('sidebar.chats')} />
+            {bbThreads.length === 0 ? (
               <div className="px-3 py-1.5 text-fg-disabled text-sm">{t('sidebar.noChats')}</div>
             ) : (
-              <div className="flex flex-col gap-1">{looseThreads.map(renderThread)}</div>
+              <div className="flex flex-col gap-1">{bbThreads.map(renderThread)}</div>
             )}
           </>
         )}

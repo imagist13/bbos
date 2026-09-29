@@ -47,6 +47,19 @@ export function EDAPage(): React.JSX.Element {
   // 草稿:path → 用户当前编辑的内容。undefined 表示没编辑过(用磁盘内容)。
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
+  // BB agent 默认进入 buckyball 仓库根。首次进 EDA 工作台时自动加载,
+  // 用户不用手动挑。已选过(workspace 非空)就跳过,允许用户切到别的目录。
+  const defaultWorkspace = trpc.eda.defaultWorkspace.useQuery();
+  const startWatching = trpc.eda.startWatching.useMutation();
+  const stopWatching = trpc.eda.stopWatching.useMutation();
+  useEffect(() => {
+    if (workspace) return;
+    const root = defaultWorkspace.data?.root;
+    if (!root) return;
+    setWorkspace(root);
+    startWatching.mutate({ path: root });
+  }, [defaultWorkspace.data, workspace, startWatching]);
+
   // tree 通过 trpc 拿,enabled 等 workspace 选好后再启动。
   const treeQuery = trpc.eda.listFiles.useQuery(
     { path: workspace ?? '' },
@@ -66,9 +79,6 @@ export function EDAPage(): React.JSX.Element {
       }
     },
   });
-
-  const startWatching = trpc.eda.startWatching.useMutation();
-  const stopWatching = trpc.eda.stopWatching.useMutation();
 
   const writeFile = trpc.eda.writeFile.useMutation({
     onSuccess: (_data, vars) => {

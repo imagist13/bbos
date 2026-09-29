@@ -18,6 +18,7 @@ import { readdirSync, readFileSync, statSync, watch, writeFileSync, type FSWatch
 import { join } from 'node:path';
 import { z } from 'zod';
 
+import { resolveBbRoot } from '@main/platform/bb-root';
 import { badRequest } from '../errors';
 import { publicProcedure, router } from '../trpc';
 
@@ -87,6 +88,12 @@ function walk(root: string, dir: string, depth: number): TreeNode[] {
 }
 
 export const edaRouter = router({
+  /**
+   * BB agent 默认工作区 —— 解析 buckyball 仓库根(env > app 根向上找 > cwd)。
+   * EDA 工作台首次进入时,会用这个路径作为 workspace,用户不用手动选。
+   */
+  defaultWorkspace: publicProcedure.query(() => ({ root: resolveBbRoot() })),
+
   /** 弹系统原生 folder picker,返回用户选择的绝对路径,取消则 null。 */
   pickWorkspace: publicProcedure.mutation(async () => {
     const win = BrowserWindow.getFocusedWindow();
