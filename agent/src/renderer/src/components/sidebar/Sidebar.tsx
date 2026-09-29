@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { dropThreadChat } from '../../lib/pi-chat/chats';
 import { trpc } from '../../lib/trpc';
 import { useCommandPalette } from '../../state/command-palette-store';
+import { useSidebarStore } from '../../state/sidebar-store';
 import { useUpdateStore } from '../../state/update-store';
 import { ProjectRow } from './ProjectRow';
 import { SbIconButton, SbNavItem, SbSection } from './primitives';
@@ -184,7 +185,13 @@ export const Sidebar = memo(function Sidebar(): React.JSX.Element {
         <SbNavItem
           icon={<ExternalLink className="size-[15px] shrink-0" />}
           label={t('sidebar.openEda')}
-          onClick={() => navigate({ to: '/eda' })}
+          onClick={() => {
+            // /eda 是全屏工作台,先收起会话栏,再跳转,避免视觉上叠在一起。
+            if (!useSidebarStore.getState().collapsed) {
+              useSidebarStore.getState().toggle();
+            }
+            navigate({ to: '/eda' });
+          }}
         />
       </nav>
 

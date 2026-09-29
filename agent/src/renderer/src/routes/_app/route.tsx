@@ -1,6 +1,6 @@
 import { createFileRoute, Outlet, useLocation } from '@tanstack/react-router';
 import { PanelLeft, PanelLeftDashed } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Sidebar } from '../../components/sidebar/Sidebar';
 import { useNavStore } from '../../state/nav-store';
 import { useSidebarStore } from '../../state/sidebar-store';
@@ -17,6 +17,21 @@ function AppLayout(): React.JSX.Element {
   const width = useSidebarStore((s) => s.width);
   const setWidth = useSidebarStore((s) => s.setWidth);
   const [dragging, setDragging] = useState(false);
+
+  // /eda 是一个全屏工作台,自带 EDASidebar;再叠加 chat Sidebar 会挤、视觉冲突。
+  // 进入 /eda → 强制 collapsed;离开 /eda → 还原展开,方便用户回到 chat 列表。
+  const isEda = location.pathname.startsWith('/eda');
+  const prevIsEda = useRef(false);
+  useEffect(() => {
+    const wasEda = prevIsEda.current;
+    prevIsEda.current = isEda;
+    const state = useSidebarStore.getState();
+    if (isEda && !state.collapsed) {
+      state.toggle();
+    } else if (!isEda && wasEda && state.collapsed) {
+      state.toggle();
+    }
+  }, [isEda]);
 
   useEffect(() => {
     setLastAppPath(location.pathname);
@@ -75,26 +90,29 @@ function AppLayout(): React.JSX.Element {
         <Outlet />
       </main>
       {/* Window-anchored toggle, right of the traffic lights. Expanded → sidebar
-          top-right (follows width); collapsed → main top-left. */}
-      <button
-        type="button"
-        onClick={toggle}
-        className="app-no-drag fixed top-[11px] z-50 rounded-md p-1.5 text-fg-tertiary hover:bg-surface-strong hover:text-fg-primary"
-        style={{
-          left: collapsed ? 84 : width - 44,
-          // Slide in lockstep with the sidebar's grid collapse; no transition
-          // while dragging so the button tracks the divider 1:1.
-          transition: dragging
-            ? 'none'
-            : 'left 200ms ease-out, color 150ms, background-color 150ms',
-        }}
-      >
-        {collapsed ? (
-          <PanelLeft className="size-[17px]" />
-        ) : (
-          <PanelLeftDashed className="size-[17px]" />
-        )}
-      </button>
+          top-right (follows width); collapsed → main top-left. 在 /eda 全屏工作台
+          里隐藏,避免和 EDA TopBar 的 Home 按钮重叠。 */}
+      {!isEda && (
+        <button
+          type="button"
+          onClick={toggle}
+          className="app-no-drag fixed top-[11px] z-50 rounded-md p-1.5 text-fg-tertiary hover:bg-surface-strong hover:text-fg-primary"
+          style={{
+            left: collapsed ? 84 : width - 44,
+            // Slide in lockstep with the sidebar's grid collapse; no transition
+            // while dragging so the button tracks the divider 1:1.
+            transition: dragging
+              ? 'none'
+              : 'left 200ms ease-out, color 150ms, background-color 150ms',
+          }}
+        >
+          {collapsed ? (
+            <PanelLeft className="size-[17px]" />
+          ) : (
+            <PanelLeftDashed className="size-[17px]" />
+          )}
+        </button>
+      )}
     </div>
   );
 }
