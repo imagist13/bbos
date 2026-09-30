@@ -1,646 +1,599 @@
-# BB-Agent ↔ BB-Server ↔ EDA 集成设计
+# BB-Agent ↔ bbdev 集成设计 (v2)
 
-> 把 bb-server 真正接进 BB-Agent，让 EDA 页面从"文件浏览器"变成"可运行仿真、可看日志、可让 AI 改配置的 DSA 工作台"。
-
-**状态**：草案，待评审
-**最后更新**：2026-09-29
-**作者**：BBOS 架构组
-**前置文档**：[`bbos/INTEGRATION.md`](../INTEGRATION.md) · [`bbos/design/backend/spec.md`](./backend/spec.md) · [`bbos/agent/CLAUDE.md`](../agent/CLAUDE.md)
+> 范围：`bbos/agent` 调 `bbdev` 的全部路径。
+> 上一版的 Rust HTTP 中间层 (`bbos/backend` / `bb-server`) **已被退役**——`bbdev/mcp` 是 agent 唯一的 DSA 网关。
+> 上一次编辑：2026-09-29（v2，退役 bb-server 后重写）。
 
 ---
 
 ## 0. TL;DR
 
-今天的事实：
+```
+┌────────────────────────────────────────────────────────────┐
+│ BB-Agent  (Electron)                                      │
+│                                                            │
+│  Main Process                                              │
+│   ├─ MCP manager   (stdIO client,复用现有基础设施)         │
+│   │     └─► buckyball-dev (bbdev/mcp)                     │
+│   │           ├─ 44 个现有 tool                            │
+│   │           ├─ list_chips      ← 新增                   │
+│   │           ├─ list_binaries   ← 新增                   │
+│   │           └─ stream_logs     ← 新增                   │
+│   ├─ chatRouter  (LLM ↔ mcp tools 自动发现)                │
+│   └─ edaMcpRouter (tRPC,转给 renderer 直接用)             │
+│                                                            │
+│  Renderer                                                  │
+│   └─ EDAPage                                              │
+│       ├─ FileTree, Editor                                  │
+│       ├─ RunPanel   → edaMcpRouter 调 MCP                  │
+│       └─ Terminal   → edaMcpRouter.stream_logs(轮询)      │
+└────────────────────────────────────────────────────────────┘
+                            │
+                            ▼ stdIO
+                ┌──────────────────────────┐
+                │ bbdev/mcp (Python)       │
+                │  ├─ common._ensure()     │
+                │  │   lazy spawn bbdev    │
+                │  │   /Motia HTTP         │
+                │  └─ 44 + 3 tools        │
+                └──────────┬───────────────┘
+                           │
+                           ▼ nix develop --command bbdev
+                      bbdev (Motia)
+                      verilator / firesim / uvm / dc / ...
+```
 
-- `bbos/agent/src/main/bb/bridge.ts` 已经能 spawn bb-server、读 `/api/health`、`/api/projects`、`/api/jobs`、`/api/workspace/:chip`，并把一行 `Current chip: …` 塞进 system prompt。
-- `bbos/agent/src/renderer/src/components/gui/EDAPage.tsx` 的右侧 "Agent" tab 是 **mock**（`setMessages` + `send` 都是本地状态）。
-- EDA 页面没有任何 "Run" 入口——用户改完 `chip.toml` 必须切回命令行 `bbdev verilator --run ...`。
-- `bb-server` 自身根据 [`bbos/backend/README.md`](../backend/README.md) 自承"Worker pool 实际运行 bbdev、Tauri sidecar 集成、集成测试"三项未做。
+**砍掉的复杂度**：
 
-要做的事，三句话：
+- ❌ `bbos/backend/` Rust workspace（4 个 crate，~600 行 Rust）
+- ❌ `bbos/agent/src/main/bb/{bridge,stream,lifecycle,jobs}.ts`
+- ❌ `bbos/agent/src/main/api/trpc/routers/bb.ts`
+- ❌ `bb-server.exe` sidecar 二进制（electron-builder 不再打）
+- ❌ SSE 日志流（用 MCP 轮询替代）
+- ❌ bb-server 的 tokio worker pool（bbdev/mcp 自管）
 
-1. **补 bb-server 的 worker pool**，让它能真跑 `bbdev`、把 stderr 通过 SSE 推出来。
-2. **在 agent 里加一层 `bb.ts` tRPC 路由器** + **EDA 专属 builtin tools**，让 Renderer 和 LLM 都能消费 bb-server。
-3. **EDA 页面加 Run Panel + Terminal + 真 Agent tab**，把"改配置 → 跑仿真 → 看日志 → 问 AI"四个动作在同一屏闭环。
+**新增的复杂度**：
+
+- ✅ `bbdev/mcp/tools/` 加 3 个 tool（~150 行 Python）
+- ✅ `bbos/agent/src/main/api/trpc/routers/eda-mcp.ts`（~120 行 TS，渲染层 ↔ MCP 的窄通道）
+- ✅ `EDAPage` 改调 tRPC → MCP tool（不再经 bb-server）
 
 ---
 
-## 1. 目标 / 非目标
+## 1. 目标与非目标
 
 ### 1.1 目标
 
-| # | 目标 | 度量 |
-|---|---|---|
-| G1 | 用户在 EDA 页面能选 chip + simulator + binary，点 Run，仿真在后台跑 | 端到端跑通 `bbdev verilator --run --chip toy --binary ...` |
-| G2 | 运行日志通过 SSE 实时刷到 EDA 底部 Terminal Panel | 第一条 stderr 在 200ms 内可见，日志延迟 < 1s |
-| G3 | EDA 右侧 Agent tab 是真 chat，能看到当前 active 文件上下文 | 用户选中 `chip.toml` 后问 AI，AI 回复时引用了文件路径/字段名 |
-| G4 | LLM 能直接调工具启动 / 取消 / 查询仿真 | 用户说"跑一下 toy 的 matmul"，agent 真的触发 verilator |
-| G5 | bb-server 进程由 agent 管理生命周期，崩溃可重启 | agent 启动时 spawn bb-server；agent 退出时 graceful SIGTERM |
+- **单一 DSA 网关**：所有 bbdev 工具调用走 `bbdev/mcp` 一个出口。
+- **零 Rust**：bbos 仓库不再包含 Rust crate；不再需要 cross-compile。
+- **LLM-native**：MCP tool 描述即 agent 工具名册，LLM 自动发现、自动选用。
+- **GUI 可预测**：EDA Page 的"▶ Run"按钮直接调 MCP tool，行为确定、可取消、可观察。
+- **流式日志可见**：用户能在 Terminal 面板看到 bbdev 跑动的 stderr。
 
-### 1.2 非目标（这一版不做）
+### 1.2 非目标
 
-- ❌ GUI ↔ Agent 的 iframe 集成（[`INTEGRATION.md` §4.2 档位 2](../INTEGRATION.md)）——那是 M5 的事，本设计只让 bbos/agent 自己完整可用。
-- ❌ bb-server 的 Tauri sidecar 集成（属于 bbos/gui 范畴）。
-- ❌ 多窗口、多 workspace（feature-inventory §5 已标"no multi-window"）。
-- ❌ 协议 crate `bbos/protocol/`（M3）——本设计允许 TS 端先有独立类型，后续从 JSON Schema 同步给 Rust。
+- **不做端云分离**：本期不引入 BB-Cloud，EDA Page 本地直连 bbdev/mcp。
+- **不做多 workspace 并行**：v2 只支持单 workspace 上下文；多 workspace 留给 v3。
+- **不重写 bbdev**：bbdev 自身是独立 Rust/Python 项目，BBOS 不动它的 API 表面。
+- **不替代 Nix**：`nix develop --command bbdev` 仍是用户机器的隐含前提；BBOS 不打包 nix。
 
 ---
 
-## 2. 架构总览
+## 2. 架构
 
-### 2.1 三层拓扑
+### 2.1 进程拓扑
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│  bbos/agent (Electron)                                               │
-│                                                                      │
-│  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────────┐  │
-│  │ Renderer        │  │ Main Process     │  │ Sidecar             │  │
-│  │ (React)         │  │ (Node)           │  │                     │  │
-│  │                 │  │                  │  │                     │  │
-│  │ EDAPage         │◀─│ tRPC IPC         │  │                     │  │
-│  │  ├ Sidebar      │  │  ├ bbRouter ◀────┼──┼──► bb-server (Rust) │  │
-│  │  ├ Editor       │  │  ├ edaRouter     │  │     127.0.0.1:P     │  │
-│  │  ├ RunPanel ◀───┼──│  └ chatRouter    │  │        │            │  │
-│  │  │   Terminal ◀─┼──│       │          │  │        ▼            │  │
-│  │  └ RightPanel ──┼──│       ▼          │  │     bbdev (bash)    │  │
-│  │                 │  │  EDA Tools       │  │        │            │  │
-│  │                 │  │  ├ eda_run_sim   │  │        ▼            │  │
-│  │                 │  │  ├ eda_list_chip │  │     verilator /     │  │
-│  │                 │  │  └ eda_get_job   │  │     spike / nix     │  │
-│  └─────────────────┘  └──────────────────┘  └─────────────────────┘  │
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘
-```
-
-**关键边界**：
-
-- `bb-server` **不**感知 LLM，**不**感知 EDA，只是个 bbdev 网关 + SSE 广播。
-- EDA Tools 是 **Agent 的 builtin tools**（`src/main/agent/tools/builtins/`），LLM 通过工具调用触达 bb-server。模型永远不直接 fetch localhost。
-- Renderer 通过 tRPC 拉数据、订阅 SSE；不直接 fetch bb-server，**端口发现由 main process 持有**。
-
-### 2.2 进程生命周期
-
-| 事件 | bb-server | bbos/agent |
+| 进程 | 职责 | 启动方 |
 |---|---|---|
-| agent 启动 (`whenReady`) | spawn (`bridge.ts:startBbServer`) | — |
-| agent 启动失败 bb-server | log 警告，照常进 chat（agent 不强制依赖 bb-server） | 优雅降级 |
-| 用户首次进入 `/eda` | （已在跑） | `bbRouter.health()` 探测，失败则提示 "BB-Server offline" |
-| agent 退出 (`will-quit`) | SIGTERM（`stopBbServer`） | exit |
-| bb-server 中途崩溃 | — | `bridge.ts` 每 30s `bbHealthCheck`，连续 3 次失败 → 重启 |
+| `BB-Agent`（Electron 主进程）| mcpManager、tRPC、chatRouter、生命周期 | 用户启动 BB-Agent |
+| `bbdev/mcp`（Python）| MCP server，`common._ensure()` lazy spawn bbdev | mcpManager 启动 stdIO |
+| `bbdev`（Motia HTTP server）| 真正跑 verilator/firesim/uvm | bbdev/mcp lazy 启动 |
+
+**关键点**：`bbdev/mcp` 是**按需启动**的（lazy）。第一个 tool 调用才 `nix develop --command bbdev start --server` 拉起来，最长等 120s。后续调用复用同一进程。BB-Agent 不需要单独再启任何东西。
+
+### 2.2 调用路径
+
+#### 路径 ①：用户在 EDA Page 点 "▶ Run"
+
+```
+EDAPage.RunPanel
+   │  onClick (electron renderer)
+   ▼
+edaMcpRouter.runSimulation(chip, binary, kind)
+   │  tRPC over IPC (BB-Agent internal)
+   ▼
+mcpManager.callTool('buckyball-dev', 'bbdev_verilator_run', { chip, binary })
+   │  stdIO message
+   ▼
+bbdev/mcp  tools/verilator_run.py:bbdev_verilator_run
+   │  common.submit('/verilator/run', params)
+   ▼
+bbdev HTTP server  POST /verilator/run  → 返 trace_id
+   │
+   ▼ (异步,数秒-数分钟)
+bbdev/server.log 写入运行结果
+state_store.db/<trace_id>.bin 写入最终结果
+```
+
+UI 在拿到 trace_id 后，进入 **轮询模式**：
+
+```
+EDAPage.RunPanel (mount)
+   │
+   ▼ setInterval(1000)
+edaMcpRouter.streamLogs(traceId, since)
+   │
+   ▼
+mcpManager.callTool('buckyball-dev', 'bbdev_stream_logs', { trace_id, since_line })
+   │
+   ▼
+bbdev/mcp  tools/stream_logs.py:bbdev_stream_logs (本期新增)
+   │
+   ▼ 读 bbdev/server.log,过滤 [trace_id] 前缀
+   │
+   ▼ 返回从 since_line 之后的新行
+```
+
+#### 路径 ②：用户在 chat 里说"跑个 toy"
+
+```
+chat.send(userMessage)
+   │
+   ▼ LLM
+LLM 看到 bbdev/mcp 注册的 44 + 3 个 tool
+   │
+   ▼ tool_use
+mcpManager.callTool('buckyball-dev', 'bbdev_verilator_run', {...})
+   │
+   ▼ 同一路径,后续同上
+```
+
+LLM 与 GUI **共享同一条工具路径**。这意味着：
+
+- LLM 跑的 Run 也产生 trace_id，UI 可以 attach 同一个 trace 看日志。
+- LLM 取消的任务也走 `task_cancel` tool，UI 无差异。
+- LLM 的 system prompt **必须包含**：
+
+  > 「bbdev/mcp 提供的工具说明即你的工具列表；如果你想跑仿真，调用 `bbdev_verilator_run` 等 tool；通过 `bbdev_task_status <trace_id>` 轮询；用 `bbdev_stream_logs <trace_id>` 读实时日志。」
+
+### 2.3 生命周期
+
+| 阶段 | 行为 |
+|---|---|
+| BB-Agent 启动 | `mcpManager.start()` 自动 spawn `bbdev/mcp`（stdIO 启动是立即的，< 1s） |
+| 第一次 tool 调用 | `bbdev/mcp` 内 `_ensure()` lazy spawn bbdev + 健康探测（最坏 120s） |
+| BB-Agent 退出 | `mcpManager.dispose()` 关 stdIO，bbdev/mcp 的 `atexit` 触发 `_stop()` 杀 bbdev |
+| bbdev 进程崩溃 | 下一次 tool 调用触发 `_ensure()` 重启；UI 端 `stream_logs` 返 `restarted` 标记 |
 
 ---
 
-## 3. bb-server 端：补 Worker Pool
+## 3. bbdev/mcp 新增工具规格
 
-> 这是 [`bbos/design/backend/spec.md`](./backend/spec.md) §6 的未完工部分。这一节是"补完规格"，不是新设计。
+### 3.1 `bbdev_list_chips`
 
-### 3.1 当前缺口
+```python
+@mcp.tool()
+def bbdev_list_chips(root: str = ".") -> list[dict]:
+    """
+    Scan a workspace root for all chips.
 
-`bbos/backend/README.md` 自承：
-- [ ] Worker pool 实际运行 bbdev
-- [ ] Tauri sidecar 集成
-- [ ] 集成测试（fake bbdev fixture）
+    Args:
+        root: Workspace root path (default = current working directory).
 
-### 3.2 本设计要补的第一项（最小可用）
+    Returns:
+        [{"name": "toy", "path": "/abs/path/to/toy/chip.toml",
+          "root": "/abs/path/to/toy", "config": { ... }}, ...]
 
-**Worker pool + bbdev 实际执行**：
-
-```
-bb-server
-├── POST /api/jobs            → 入队 → 立刻返回 { jobId }
-├──  tokio task pool (N=4)    → 取出 job → spawn bbdev subprocess
-├──  stdout/stderr 管道        → 行解析 → 写日志文件 + 推 SSE
-└──  GET  /api/jobs/:id/logs  → SSE 订阅该 job 的历史 + live tail
-```
-
-### 3.3 行为契约（要写到 spec.md §6 里）
-
-| 端点 | 请求 | 响应 |
-|---|---|---|
-| `POST /api/jobs` | `{ kind: "verilator" \| "workload-build" \| "uvm", chip: string, binary?: string, args?: string[] }` | `201 { jobId, status: "queued" }` |
-| `GET  /api/jobs` | — | `[JobSummary]` |
-| `GET  /api/jobs/:id` | — | `JobState` |
-| `GET  /api/jobs/:id/logs` | — | **SSE**（`event: log` / `event: state` / `event: exit`） |
-| `POST /api/jobs/:id/cancel` | — | `200 { ok }` 或 `409 { reason }` |
-
-**日志行协议**（SSE frame）：
-
-```
-event: log
-data: {"ts":1737120000123,"stream":"stdout","line":"[Progress: 25%] ..."}
-
-event: state
-data: {"jobId":"j_42","status":"running","exitCode":null}
-
-event: exit
-data: {"jobId":"j_42","status":"success","exitCode":0,"durationMs":12345}
+    Notes:
+        - 搜索 <root>/**/chip.toml
+        - 返回的 "config" 字段包含 chip.toml 的解析结果
+          (顶层 [chip] table,以及 [[target]] 表的简表)
+        - 工作区根路径可以是 buckyball/bb-tests 或 examples
+    """
 ```
 
-**进程模型**：
-- worker = `tokio::process::Command::new("bbdev")` + 子命令 arg 列表，**不通过 shell**，避免引号注入（见 `INTEGRATION.md §7`）。
-- `cancel` 发 SIGTERM；5s 没死发 SIGKILL。
-- 日志**同时**写 `userData/jobs/<jobId>.log`（落盘）和推 SSE（实时）。
-- worker pool 容量 4，job 多于 4 时排队，状态 `queued`。
+**调用方**：EDAPage 文件树 mount 时；用户改 workspace 设置时。
+
+### 3.2 `bbdev_list_binaries`
+
+```python
+@mcp.tool()
+def bbdev_list_binaries(chip: str) -> list[dict]:
+    """
+    List all baremetal binaries available for a chip.
+
+    Args:
+        chip: Chip name (e.g. "toy").
+
+    Returns:
+        [{"name": "matmul", "path": "/abs/path/to/matmul.bin",
+          "size_bytes": 12345, "kind": "baremetal"}, ...]
+
+    Search paths (priority order):
+        1. <workspace_root>/examples/chips/<chip>/binaries/
+        2. <workspace_root>/buckyball/bb-tests/workloads/<chip>/
+        3. bbdev/api/.cache/<chip>/
+
+    Notes:
+        - 只列出 *.bin, *.elf, *.hex
+        - size_bytes 取自 os.stat
+    """
+```
+
+**调用方**：EDAPage.RunPanel 选定 chip 后 mount；EDA Page 的 "binary 下拉"。
+
+### 3.3 `bbdev_stream_logs`
+
+```python
+@mcp.tool()
+def bbdev_stream_logs(
+    trace_id: str,
+    since_line: int = 0,
+    max_lines: int = 1000,
+) -> dict:
+    """
+    Read new log lines for a trace from bbdev/server.log.
+
+    Args:
+        trace_id: The trace_id returned by submit() tools.
+        since_line: Cursor; first call passes 0, subsequent calls pass the
+                    "next_line" returned by the previous call.
+        max_lines: Cap on lines returned per call (default 1000).
+
+    Returns:
+        {
+          "trace_id": "...",
+          "lines": ["line 1", "line 2", ...],
+          "next_line": 42,
+          "eof": False,        # True when state_store has the terminal result
+          "finished": False,   # True when task is done (state != running)
+          "result": {...}      # If finished, the final state (mirrors task_status)
+        }
+
+    Notes:
+        - 读取 bbdev/server.log,过滤含 "[<trace_id>]" 的行
+        - server.log 是 nix develop 子进程的合并 stdout/stderr,bbdev 会用
+          约定前缀标记 trace_id
+        - 若 since_line 超出已读范围,返回 EOF 提示,客户端应降频
+        - 1s 轮询节奏:UI 调用方应 setInterval(1000) 即可
+    """
+```
+
+**调用方**：EDAPage.TerminalPanel；chat 中 LLM 看到 task 进度也可调用。
+
+### 3.4 现有 44 个 tool（无需改动）
+
+`bbdev_task_status(trace_id)` 已经在 `common.py` 里实现了**最终结果**轮询；新 `stream_logs` 补充**过程中日志**轮询。两者结合：
+
+| 场景 | 用哪个 |
+|---|---|
+| 只想要最终结果 | `task_status` |
+| 想要实时 stderr | `stream_logs`（轮询 1s）|
+| 同时要两者 | 并发调两个 |
+
+LLM 工具描述里写清这个差异，避免重复调用。
 
 ---
 
-## 4. bbos/agent 端：三层新增
+## 4. BB-Agent 端改动
 
-### 4.1 新增模块清单
+### 4.1 `resources/mcp.json`（无改动）
 
-```
-bbos/agent/src/
-├── main/
-│   ├── bb/
-│   │   ├── bridge.ts            (已有 —— 扩展)
-│   │   ├── lifecycle.ts         (新增 —— 健康探测 + 自动重启)
-│   │   └── stream.ts            (新增 —— SSE 订阅的轻量 EventSource 封装)
-│   ├── api/trpc/routers/
-│   │   └── bb.ts                (新增 —— bb-server HTTP 代理给 Renderer)
-│   └── agent/tools/builtins/
-│       ├── eda-list-chips.ts    (新增)
-│       ├── eda-list-binaries.ts (新增)
-│       ├── eda-run-simulation.ts(新增)
-│       ├── eda-get-job.ts       (新增)
-│       └── eda-cancel-job.ts    (新增)
-└── renderer/src/
-    ├── components/gui/
-    │   ├── RunPanel.tsx         (新增 —— chip/simulator/binary 三选 + Run)
-    │   ├── TerminalPanel.tsx    (新增 —— xterm.js 流式日志)
-    │   └── eda-context.ts       (新增 —— 当前 active file 的 contextRef 注入)
-    └── lib/trpc.ts              (扩展 —— 加 bb router)
+```json
+{
+  "mcpServers": {
+    "buckyball-dev": {
+      "command": "python",
+      "args": ["-u", "-m", "bbdev.mcp"],
+      "cwd": "d:/acode/buckyball",
+      "env": {}
+    }
+  }
+}
 ```
 
-### 4.2 bb bridge 扩展（`bb/bridge.ts`）
+> **注意**：`cwd` 是 dev 默认值。生产环境应该跟随用户 workspace 动态设置——留给 v3，本期写死。
 
-**已有**：`startBbServer` / `stopBbServer` / `bbHealthCheck` / `listProjects` / `getWorkspace` / `listJobs` / `getJob` / `buildWorkspaceNote`。
+### 4.2 `src/main/api/trpc/routers/eda-mcp.ts`（新增）
 
-**新增**：
+渲染层与 MCP 之间的窄通道。**禁止**做 `mcp.call(serverName, toolName, args)` 这种通用透传；必须显式列举允许的 tool 和它们的入参 schema：
 
 ```ts
-// bbos/agent/src/main/bb/stream.ts
+// bbos/agent/src/main/api/trpc/routers/eda-mcp.ts
 
-/**
- * 订阅 bb-server 的 job 日志 SSE。
- * - 重连：断线自动重试 3 次，指数退避 500ms / 1s / 2s
- * - 取消：返回的 unsubscribe() 同时取消 SSE 和丢弃未发送帧
- * - 去重：seq 号乱序到达时丢旧不丢新
- */
-export function streamJobLogs(
-  jobId: string,
-  onLog: (line: { ts: number; stream: 'stdout' | 'stderr'; line: string }) => void,
-  onState: (s: JobState) => void,
-  onExit: (e: { status: JobStatus; exitCode: number | null; durationMs: number }) => void,
-): () => void;
-```
-
-实现要点：
-- 用 Node 内置 `fetch` + `ReadableStream`，**不引第三方 SSE 库**。
-- 通过 `webContents.send('bb:job-log', ...)` 推到 Renderer（与 `eda:fs-event` 同一通道模式）。
-- Renderer 端用 `window.bb.onJobLog(...)`（preload 暴露）。
-
-```ts
-// bbos/agent/src/main/bb/lifecycle.ts
-
-export function startBbLifecycle(binaryPath: string): void;
-export function stopBbLifecycle(): void;
-```
-
-- 内部 30s 一次 `bbHealthCheck`；连续 3 次失败 → `startBbServer` 重启。
-- 失败时通过 `webContents.send('bb:health', { ok: false, reason })` 推一条事件，让 UI 显示降级提示（不必弹窗）。
-
-### 4.3 新 tRPC 路由器 `bb.ts`
-
-```ts
-// bbos/agent/src/main/api/trpc/routers/bb.ts
-
-import { router, publicProcedure } from '../trpc';
 import { z } from 'zod';
-import * as bb from '@main/bb/bridge';
-import { streamJobLogs } from '@main/bb/stream';
+import { router, publicProcedure } from '../trpc';
+import { mcpManager } from '../../mcp/manager';
 
-const jobKind = z.enum(['verilator', 'workload-build', 'uvm']);
+const mcp = (tool: string, args: Record<string, unknown>) =>
+  mcpManager.callTool('buckyball-dev', tool, args);
 
-export const bbRouter = router({
-  /** 健康状态,Renderer 进入 /eda 时探测一次 */
-  health: publicProcedure.query(async () => {
-    const ok = await bb.bbHealthCheck();
-    return { ok, port: bb.getBbServerPort() };
-  }),
+export const edaMcpRouter = router({
+  listChips: publicProcedure
+    .input(z.object({ root: z.string().optional() }))
+    .query(({ input }) => mcp('bbdev_list_chips', { root: input.root ?? '.' })),
 
-  /** 列出 workspace 下的 chip */
-  listProjects: publicProcedure
-    .input(z.object({ root: z.string().min(1) }))
-    .query(({ input }) => bb.listProjects(input.root)),
+  listBinaries: publicProcedure
+    .input(z.object({ chip: z.string() }))
+    .query(({ input }) => mcp('bbdev_list_binaries', { chip: input.chip })),
 
-  /** 读 chip + designs 配置 */
-  getWorkspace: publicProcedure
-    .input(z.object({ root: z.string().min(1), chip: z.string().min(1) }))
-    .query(({ input }) => bb.getWorkspace(input.root, input.chip)),
-
-  /** 列出所有 job（EdaPage 顶部 status bar 用） */
-  listJobs: publicProcedure.query(() => bb.listJobs()),
-
-  /** 单 job 状态 */
-  getJob: publicProcedure
-    .input(z.object({ id: z.string().min(1) }))
-    .query(({ input }) => bb.getJob(input.id)),
-
-  /** 启动 job */
-  runJob: publicProcedure
+  runSimulation: publicProcedure
     .input(z.object({
-      kind: jobKind,
-      chip: z.string().min(1),
-      binary: z.string().optional(),
-      args: z.array(z.string()).optional(),
+      chip: z.string(),
+      binary: z.string(),
+      kind: z.enum(['verilator', 'workload', 'uvm']).default('verilator'),
+      coverage: z.boolean().default(false),
+      noWave: z.boolean().default(false),
+      jobs: z.number().int().optional(),
     }))
-    .mutation(({ input }) => bb.runJob(input)),
-
-  /** 取消 job */
-  cancelJob: publicProcedure
-    .input(z.object({ id: z.string().min(1) }))
-    .mutation(({ input }) => bb.cancelJob(input.id)),
-
-  /** 订阅 job 日志（SSE 风格的 tRPC subscription） */
-  streamJobLogs: publicProcedure
-    .input(z.object({ id: z.string().min(1) }))
-    .subscription(({ input }) => observable<JobLogEvent>((emit) => {
-      const off = streamJobLogs(input.id, /*...*/);
-      return off;
+    .mutation(({ input }) => mcp('bbdev_verilator_run', {
+      chip: input.chip,
+      binary: input.binary,
+      coverage: input.coverage,
+      'no-wave': input.noWave,
+      jobs: input.jobs,
     })),
+
+  streamLogs: publicProcedure
+    .input(z.object({
+      traceId: z.string(),
+      sinceLine: z.number().int().default(0),
+      maxLines: z.number().int().default(1000),
+    }))
+    .query(({ input }) => mcp('bbdev_stream_logs', {
+      trace_id: input.traceId,
+      since_line: input.sinceLine,
+      max_lines: input.maxLines,
+    })),
+
+  taskStatus: publicProcedure
+    .input(z.object({ traceId: z.string() }))
+    .query(({ input }) => mcp('bbdev_task_status', { trace_id: input.traceId })),
+
+  taskCancel: publicProcedure
+    .input(z.object({ traceId: z.string() }))
+    .mutation(({ input }) => mcp('bbdev_task_cancel', { trace_id: input.traceId })),
 });
 ```
 
-**职责切分**：
-- `bb.ts`（tRPC）= Renderer ↔ main process 的 IPC 边界
-- `bb/bridge.ts` = main process ↔ bb-server 的 HTTP 边界
-- `bb/stream.ts` = SSE 客户端（独立于 tRPC，方便 EDA tools 复用）
+### 4.3 `src/shared/settings.ts`（改造）
 
-### 4.4 EDA 专属 Agent Tools（LLM 能调的）
+删除 `workspace.currentChip`：
 
-放在 `src/main/agent/tools/builtins/eda-*.ts`，每个文件一个 `defineTool(...)`：
+```diff
+- workspace: workspaceShape.default(workspaceShape.parse({})),
++ // workspace shape 整体删除;chip 选择改为运行时调 MCP
+```
+
+替代方案：UI 上 chip 选择器直接调 `edaMcpRouter.listBinaries(chip)`，**不再持久化到 settings**。
+
+### 4.4 `src/main/index.ts`（已清理）
+
+上一版删掉了 `startBbServer` / `stopBbServer` 调用。`shutdown()` 函数相应简化：
 
 ```ts
-// eda-run-simulation.ts
-defineTool({
-  name: 'eda_run_simulation',
-  description: 'Kick off a Verilator / workload / UVM simulation job. Returns a jobId for tracking.',
-  input: Type.Object({
-    chip: Type.String({ description: 'Chip name, e.g. "toy"' }),
-    binary: Type.Optional(Type.String({ description: 'Baremetal binary, e.g. "toy-toy-vecunit_matmul_ones-baremetal"' })),
-    kind: Type.Union([Type.Literal('verilator'), Type.Literal('workload-build'), Type.Literal('uvm')]),
-    args: Type.Optional(Type.Array(Type.String())),
-  }),
-  execute: async (_id, { chip, binary, kind, args }, _ctx) => {
-    const { jobId } = await bb.runJob({ kind, chip, binary, args });
-    return textResult(`Started job ${jobId}. Use eda_get_job(${jobId}) to poll.`);
-  },
-});
-
-// eda-get-job.ts
-defineTool({
-  name: 'eda_get_job',
-  description: 'Get current status and (last 100 lines of) logs of a job.',
-  input: Type.Object({ jobId: Type.String() }),
-  execute: async (_id, { jobId }) => {
-    const state = await bb.getJob(jobId);
-    const tail = await bb.tailJobLog(jobId, 100);
-    return textResult(formatJob(state, tail));
-  },
-});
-
-// eda-cancel-job.ts
-defineTool({
-  name: 'eda_cancel_job',
-  description: 'Cancel a running job. Idempotent.',
-  input: Type.Object({ jobId: Type.String() }),
-  execute: async (_id, { jobId }) => {
-    const res = await bb.cancelJob(jobId);
-    return textResult(res.ok ? `Cancelled ${jobId}.` : `Could not cancel: ${res.reason}`);
-  },
-});
-
-// eda-list-chips.ts / eda-list-binaries.ts —— 简单包装 bb.listProjects / bb.listBinaries
-```
-
-**注入上下文**：
-- 系统提示词里 `buildWorkspaceNote` 已有 `Current chip: …` 和 `Running jobs: …` 列表。
-- 工具描述里写明「若用户没指定 chip，请先调 `eda_list_chips` + 问用户」——避免 LLM 凭空猜。
-
-**权限**：`eda_run_simulation` 走 permission gate，**default 模式弹卡**让用户确认，**auto-review 模式**直接放行（沙箱行为可预测）。
-
-### 4.5 EDA 页面：RunPanel + TerminalPanel + 真 Agent Tab
-
-#### 4.5.1 布局调整
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│  TopBar  (← Home / EDA Workbench / Save / ▶ Run / ⚙)         │
-├────────────┬──────────────────────────────┬─────────────────┤
-│ Sidebar    │ Tabs + Editor                │ Right Panel     │
-│ (文件树)   │                              │ ┌──Workspace────┤│
-│            │                              │ │ chip / tiles  ││
-│            │                              │ ├───────────────┤│
-│            │                              │ │Agent (真 chat)││
-│            ├──────────────────────────────┤ │              ││
-│            │ Terminal (高度可拖拽)         │ │              ││
-│            │  ▶ toy matmul ─── running     │ │              ││
-│            │  [stdout] [Progress: 25%] …  │ │              ││
-│            │  [stderr] Warning: …         │ │              ││
-│            │  [Stop]                      │ └──────────────┘│
-└────────────┴──────────────────────────────┴─────────────────┘
-```
-
-- Terminal 默认折叠、高度 200px、顶部有一个可拖拽的 resize handle（沿用 EDA Page 已有的 drag-to-resize 模式）。
-- 跑 job 时自动展开，job exit 后 30s 不动 → 折叠。
-- 多个 job 同时跑 → Terminal 顶部一个 chip-like tab 切换（"toy matmul" / "gemmini relu"）。
-
-#### 4.5.2 RunPanel 选型数据来源
-
-- **chip 下拉**：`bb.listProjects(root)` 返回的 chip 列表。
-- **simulator 下拉**：写死 `[Verilator, BEMU, FireSim, P2E]`（bb-server 端的 kind 枚举）。
-- **binary 下拉**：调 `bb-server /api/projects/<chip>/binaries` —— 这个端点**目前不存在**，本设计要补：扫 `examples/chips/<chip>/binaries/` + `buckyball/bb-tests/workloads/<chip>/*.bin` 拼成列表。
-
-#### 4.5.3 RightPanel "Agent" tab 改造
-
-把现在的 `EDARightPanel.tsx` 里的 mock state 全删，换成真 chat：
-
-```tsx
-function AgentTab({ activeFile }: { activeFile: OpenFile | null }) {
-  const [threadId, setThreadId] = useState<string | null>(null);
-  const { data: thread } = trpc.threads.get.useQuery(
-    { id: threadId! },
-    { enabled: Boolean(threadId) },
-  );
-
-  // 用户首次进入该 tab → 创建（或复用）一个 EDA 专属 thread
-  useEffect(() => {
-    trpc.threads.create.mutate({
-      title: `EDA: ${activeFile?.name ?? 'workspace'}`,
-      projectId: ???, // TODO: chipId 是哪个？见 §10 开放问题
-    }).then(({ id }) => setThreadId(id));
-  }, []);
-
-  // 切文件 → attachFile 把内容塞上下文
-  useEffect(() => {
-    if (!activeFile || !threadId) return;
-    trpc.chat.attachFile.mutate({
-      threadId,
-      path: activeFile.path,
-      content: activeFile.draft ?? cachedContent,
-    });
-  }, [activeFile?.path]);
-
-  return <ChatView threadId={threadId} />;
+async function shutdown() {
+  // scheduled, runner, mcp, updater, session-store, db
 }
 ```
 
-要点：
-- 复用现有 `chatRouter` 的 `send` / `events` / `rejoin`。
-- 上下文通过新的 `chat.attachFile` mutation 注入（这个 mutation 已经在 spec 里规划但没实现 —— 见 [`feature-inventory.md`](../agent/docs/feature-inventory.md) §4 提到的 "attachFile" payload）。
-- workspace / chips 信息走 `buildWorkspaceNote` 已经在 system prompt 里。
+### 4.5 System prompt（新增/改造）
 
----
+`chatRouter` 注入的 system prompt 增加：
 
-## 5. 类型契约
+```text
+## DSA 工具
 
-下面这些类型写在 `src/shared/bb.ts`，bb.ts router、EDA tools、EDA RunPanel 共享。
+你通过 `bbdev/mcp` MCP server 调用所有 DSA (Domain-Specific Accelerator) 工具。
+当前注册的 server 叫 `buckyball-dev`,44 + 3 个 tool。
 
-```ts
-// bbos/agent/src/shared/bb.ts
+关键 tool:
+- bbdev_verilator_run (chip, binary, [coverage, no_wave, jobs, ...])
+- bbdev_workload_build / bbdev_workload_clean
+- bbdev_uvm_build / bbdev_uvm_run
+- bbdev_task_status (trace_id) → 最终结果
+- bbdev_stream_logs (trace_id, since_line) → 实时 stderr
+- bbdev_task_cancel (trace_id) → 取消运行中任务
+- bbdev_list_chips (root) → 列出 workspace 里所有 chip
+- bbdev_list_binaries (chip) → 列出某个 chip 的 baremetal 二进制
 
-export type JobKind = 'verilator' | 'workload-build' | 'uvm';
-export type JobStatus = 'queued' | 'running' | 'success' | 'failed' | 'cancelled';
+工作流:
+1. 用户说"跑 toy 的 matmul":先 bbdev_list_binaries("toy") 确认 matmul.bin 存在
+2. 调 bbdev_verilator_run,拿 trace_id
+3. 给用户回 trace_id,告诉他"已提交"
+4. 用户问进度:调 bbdev_stream_logs 看实时日志;调 bbdev_task_status 看最终结果
+5. 任务取消:调 bbdev_task_cancel
 
-export interface JobSummary {
-  id: string;
-  kind: JobKind;
-  chip: string;
-  binary?: string;
-  status: JobStatus;
-  createdAt: string;       // ISO
-  finishedAt?: string;
-  returnCode?: number;
-}
-
-export interface JobState extends JobSummary {
-  command: string[];       // 实际传给 bbdev 的 argv
-  logOffset: number;       // 已读 SSE 行数,rejoin 时 from= 这个
-}
-
-export interface JobLogEvent {
-  type: 'log' | 'state' | 'exit';
-  jobId: string;
-  ts?: number;
-  stream?: 'stdout' | 'stderr';
-  line?: string;
-  state?: JobState;
-  exit?: { status: JobStatus; exitCode: number | null; durationMs: number };
-}
-
-export interface RunJobInput {
-  kind: JobKind;
-  chip: string;
-  binary?: string;
-  args?: string[];
-}
-
-export interface WorkspaceInfo {
-  chip: string;
-  root: string;
-  designs: string[];
-  cores: string[];
-}
+如果工具返 success=false,不要重试超过 1 次,直接告诉用户错在哪。
 ```
 
 ---
 
-## 6. 数据流：用户点 Run 之后发生了什么
+## 5. EDA Page 改动
+
+### 5.1 RunPanel
+
+`▶ Run` 按钮 → `edaMcpRouter.runSimulation(...)`，**不经过 LLM**。理由：
+
+- 行为可预测（同一份输入同一份输出）
+- 启动延迟低（无 LLM round-trip）
+- 用户已经知道要跑什么，不需 AI 解释
+
+UI 状态机：
 
 ```
-User clicks [▶ Run] in RunPanel
-  │
+idle
+  │ click Run
   ▼
-EDAPage.handleRun()                    (renderer)
-  │  trpc.bb.runJob.mutate({ kind, chip, binary })
+submitting (mutation in flight)
+  │ done (trace_id 拿到)
   ▼
-bbRouter.runJob                        (main, tRPC)
-  │  bridge.runJob(input)              (main → bb-server HTTP POST /api/jobs)
+polling (setInterval 1000 → streamLogs + taskStatus)
+  │ finished === true
   ▼
-bb-server: 201 { jobId }              → 返 Renderer
-  │
+finished (显示 stdout 摘要 + terminal 日志)
+  │ click Rerun / new chip
   ▼
-EDAPage 自动订阅 trpc.bb.streamJobLogs({ id: jobId })
-  │
-  ▼
-bbRouter.streamJobLogs                 (tRPC subscription)
-  │  stream.ts.streamJobLogs(jobId, onLog, onState, onExit)
-  ▼
-bb-server: GET /api/jobs/:id/logs      (SSE)
-  │
-  ▼
-每条 SSE 帧:
-  - onLog   → webContents.send('bb:job-log', line)  →  TerminalPanel 追加一行
-              onState → 更新顶部 status badge (queued/running/success/...)
-              onExit  → Terminal 标灰、status 终态、Toast「job done」
+idle
 ```
 
-失败路径：
+取消按钮 → `edaMcpRouter.taskCancel(traceId)`。
 
-- bb-server 不在 → `trpc.bb.health()` 失败 → RunPanel 灰显 + tooltip "BB-Server offline — restart agent"
-- bb-server 返回 4xx → `runJob` mutation 抛 TRPCError → RunPanel 显示红色 banner
-- bb-server 推 SSE 断流 → `stream.ts` 重试 3 次（500ms / 1s / 2s）→ 还失败 → Terminal 顶部显示 "Reconnecting…" → 还失败 → 标记 job 状态 `unknown`，让用户手动 `eda_get_job`
+### 5.2 TerminalPanel
+
+订阅 `streamLogs` 轮询结果，渲染为可滚动只读文本。**不要**用 xterm.js 这种重型组件——just a `<pre>` with auto-scroll。
+
+当 `eof && finished` 时停止轮询，显示"任务完成 - [查看结果]"。
+
+### 5.3 FileTree / Editor
+
+无变化（这部分本来就是本地文件系统操作，不经过 bbdev）。
 
 ---
 
-## 7. 文件结构总结
+## 6. 错误处理
 
-新增：
-
-```
-bbos/agent/src/
-├── main/
-│   ├── bb/
-│   │   ├── lifecycle.ts          # 健康探测 + 自动重启
-│   │   └── stream.ts             # SSE 订阅
-│   ├── api/trpc/routers/
-│   │   └── bb.ts                 # Renderer ↔ bb-server 桥
-│   └── agent/tools/builtins/
-│       ├── eda-list-chips.ts
-│       ├── eda-list-binaries.ts
-│       ├── eda-run-simulation.ts
-│       ├── eda-get-job.ts
-│       └── eda-cancel-job.ts
-├── renderer/src/
-│   ├── components/gui/
-│   │   ├── RunPanel.tsx
-│   │   ├── TerminalPanel.tsx
-│   │   └── eda-context.ts        # active file → chat context
-│   └── lib/trpc.ts               # + bb router
-└── shared/
-    └── bb.ts                     # 共享类型
-
-bbos/backend/crates/bb-server/src/
-├── jobs/
-│   ├── pool.rs                   # tokio task pool,新增
-│   ├── runner.rs                 # bbdev subprocess,新增
-│   └── log_tail.rs               # 文件 tail,新增
-└── api/
-    └── jobs.rs                   # 已有 endpoint,接 runner
-
-bbos/backend/crates/bb-bbdev/src/
-├── lib.rs                        # 已有;新增 cmd 列表 / binary scan
-```
-
-修改：
-
-```
-bbos/agent/src/main/index.ts                    # + lifecycle 启动/停止
-bbos/agent/src/main/bb/bridge.ts                # + runJob/cancelJob/tailJobLog/listBinaries
-bbos/agent/src/main/api/trpc/router.ts          # + bbRouter
-bbos/agent/src/renderer/src/components/gui/EDAPage.tsx  # + RunPanel + Terminal + 真 Agent tab
-bbos/agent/electron-builder.yml                 # extraResources: ["resources/bin/bb-server*"]
-bbos/agent/package.json                         # postinstall: 编译 bb-server
-bbos/agent/scripts/build-bb-server.sh           # 新增
-```
-
----
-
-## 8. 实施步骤（按依赖排序）
-
-每一步收口条件 = `bun run check && bun test` 通过 + 该步的 E2E 脚本绿。
-
-| 步 | 内容 | 验证 |
+| 错误源 | 检测 | UI 表现 |
 |---|---|---|
-| **1** | `bridge.ts` 加 `runJob` / `cancelJob` / `tailJobLog` / `listBinaries` 四个 wrapper | 单测：mock fetch，断言请求体正确 |
-| **2** | bb-server `bb-server/crates/bb-server/src/jobs/{pool,runner,log_tail}.rs` | cargo test 通过；用 fake bbdev fixture 跑端到端 |
-| **3** | bb-server `GET /api/projects/:chip/binaries` | curl 拿到 binary 列表 |
-| **4** | agent `bb/stream.ts` + `bb/lifecycle.ts` | 单测 + 手动启 agent 看 console 健康日志 |
-| **5** | agent `api/trpc/routers/bb.ts` | tRPC 调用通过；`bun run check` 通过 |
-| **6** | agent `tools/builtins/eda-*.ts`（5 个） | bun test + 端到端：模型能正常调用并看到 bb-server job |
-| **7** | agent `RunPanel.tsx` + `TerminalPanel.tsx` 接进 `EDAPage.tsx` | 手动：选 chip → 点 Run → Terminal 出日志 → Stop 生效 |
-| **8** | EDARightPanel Agent tab 改造（真 chat） | 手动：切文件 → 输入"这个字段啥意思" → 模型答出 |
-| **9** | `electron-builder.yml` + `scripts/build-bb-server.sh` | `bun run build:win` 产物里 `resources/bin/bb-server.exe` 存在 |
-| **10** | bb-server `cargo build --release` 集成进 `postinstall` | 全新 clone → `bun install` → bb-server 已就绪 |
+| `bbdev/mcp` 启动失败（python not found） | mcpManager 连接失败 | "找不到 python，请安装 Python 3.11+" |
+| bbdev 启动失败（nix not found） | `common._ensure()` 抛 `nix not found` | "找不到 nix，请安装 Nix 包管理器" |
+| bbdev 健康检查 120s 超时 | `_ensure()` raise | "bbdev 启动超时，请查看日志: bbdev/server.log" |
+| 工具调用 4xx/5xx | `_http()` 返错误 | "bbdev 拒绝: <error>" |
+| bbdev 进程崩溃 | `_ready()` 返 False | 下次工具调用自动重启,UI 端 stream_logs 短暂中断 |
 
-完成 1–7 = MVP；8 = P0 闭环；9–10 = 可分发包。
+**日志位置**：`bbdev/server.log`（绝对路径通过 `common.log_path()` 获取，可在 system info 里展示）。
 
 ---
 
-## 9. 测试策略
+## 7. 文件清单
 
-### 9.1 单元测试
+### 7.1 删除（已处理）
 
-- `bridge.ts`：用 `vi.fn()` 替换 fetch，断言 4 个 wrapper 的请求 path / body / 错误码。
-- `stream.ts`：用 fake SSE server（`node:net` 起一个）发几行后断流，断言 reconnect 行为。
-- EDA tools：mock bb-server response，断言 tool result 文本格式。
-
-### 9.2 端到端（fake bbdev）
-
-在 `bbos/backend/crates/bb-server/tests/` 下加：
-
-```rust
-// fake_bbdev.rs
-#[tokio::test]
-async fn run_job_streams_logs() {
-    // 1. 启 bb-server,端口 0
-    // 2. POST /api/jobs { kind: verilator, chip: toy }
-    // 3. GET /api/jobs/:id/logs → 拿 SSE
-    // 4. 收到 stdout/stderr 多行 + 最终 exit event
-}
+```
+bbos/backend/                                  # 整个 Rust workspace
+bbos/agent/src/main/bb/                        # bridge, lifecycle, jobs, stream
+bbos/design/backend/                           # spec.md, dev.md
+bbos/design/agent-bbserver-integration.md      # 上一版
 ```
 
-`fake_bbdev` = 一个 Rust 二进制，接受 `[--emit-stdout=N] [--exit-code=N]` 参数，按节奏往 stdout 吐行，最终退出。
+### 7.2 新增
 
-### 9.3 E2E（Playwright + Electron）
+```
+bbdev/mcp/tools/list_chips.py
+bbdev/mcp/tools/list_binaries.py
+bbdev/mcp/tools/stream_logs.py
+bbdev/mcp/tests/test_list_chips.py
+bbdev/mcp/tests/test_list_binaries.py
+bbdev/mcp/tests/test_stream_logs.py
 
-`bbos/agent/e2e/` 下加：
+bbos/agent/src/main/api/trpc/routers/eda-mcp.ts
+```
 
-- `eda-run-job.spec.ts`：启动 agent dev mode，打开 `/eda`，选 chip → Run → Terminal 出现 `[Progress: 100%]` → 状态变 success。
-- `eda-ask-agent.spec.ts`：选中 `chip-top.toml` → Agent tab → 输入"nTiles 字段含义" → 收到包含"tile"字眼的回复。
+### 7.3 改动
+
+```
+bbos/agent/src/shared/settings.ts              # 删除 workspace shape
+bbos/agent/src/main/index.ts                   # 已清理
+bbos/agent/src/renderer/.../EDAPage/RunPanel.tsx  # 调 edaMcpRouter
+bbos/agent/src/renderer/.../EDAPage/Terminal.tsx  # 调 edaMcpRouter.streamLogs
+bbos/agent/src/main/chatRouter/systemPrompt.ts     # 增加 DSA 工具章节
+bbos/INTEGRATION.md                            # 删 backend 章节
+```
+
+### 7.4 不动
+
+```
+bbos/agent/resources/mcp.json                  # 已有 buckyball-dev 注册
+bbos/agent/electron-builder.yml                # 不再打 bb-server.exe
+bbdev/mcp/tools/__init__.py                    # 仅注册新 tool
+bbdev/mcp/common.py                            # _ensure 已够用
+```
 
 ---
 
-## 10. 开放问题（评审时定）
+## 8. 实施步骤
 
-| # | 问题 | 倾向 |
+按顺序，每步可独立验证：
+
+| # | 步骤 | 验证 |
 |---|---|---|
-| Q1 | `threads.create` 需要 `projectId`，但 EDA 的"项目"是 `chip` 还是 `workspace root`？ | **workspace root** —— 一个 root 下多个 chip，但 thread 复用同一份上下文 |
-| Q2 | `binary` 列表扫描要不要忽略 `examples/`？ | 默认**包含** `bb-tests/workloads/` 和 `examples/chips/<chip>/`，用户后续能自己加路径 |
-| Q3 | Terminal 多 job 切换——按时间倒序还是按用户点击顺序？ | **时间倒序** + 用户可钉选 |
-| Q4 | bb-server 跨平台路径：`bb-server.exe` 还是统一 `bb-server`？ | 沿用 `bridge.ts` 现有的 `.exe` 判断 |
-| Q5 | `system prompt` 里 `buildWorkspaceNote` 当前用 `listJobs` 阻塞——> 1s 超时是否够？ | 改 **5s** + 失败返回 `'bb-server unavailable'`，agent 自己降级 |
-| Q6 | EDA 的"运行"是不是要进 permission gate？ | `eda_run_simulation` 必须 gate（破坏性）；`eda_list_*` / `eda_get_job` 不 gate |
+| 1 | 加 3 个新 bbdev/mcp tool + 单元测试 | `cd bbdev/mcp && pytest` |
+| 2 | 起 bbdev/mcp，`echo 'bbdev_list_chhips()' \| python -m bbdev.mcp` 手动测 | JSON 输出符合预期 |
+| 3 | 新增 `eda-mcp.ts` 路由 + 注册到 rootRouter | 启动 BB-Agent，`trpc.edaMcp.listChips.useQuery()` 在 devtools 能返 |
+| 4 | 改 EDAPage.RunPanel 调 tRPC | 选中 chip/binary 点 Run，能拿到 trace_id |
+| 5 | 改 EDAPage.Terminal 调 streamLogs | terminal 实时刷新 |
+| 6 | system prompt 加 DSA 章节 | 在 chat 里说"跑个 toy 的 matmul"，LLM 能找到正确的 tool |
+| 7 | 删 `workspace.currentChip` 字段 | settings 重置后不报错 |
+| 8 | 更新 INTEGRATION.md | 文档自洽 |
 
 ---
 
-## 11. 风险与对策
+## 9. 风险与开放问题
 
-| 风险 | 概率 | 影响 | 对策 |
-|---|---|---|---|
-| bb-server worker pool 性能差，多 job 跑卡 | 中 | 高 | 容量 4，可调；超载返回 429 + Retry-After |
-| SSE 在 Windows 下偶发断流 | 中 | 中 | `stream.ts` reconnect 已经覆盖；Terminal 顶部 banner 提示 |
-| bb-server 二进制分发到 Electron 资源里被杀毒误报 | 低 | 高 | electron-builder 加 `signtool`；发布说明里附 SHA256 |
-| LLM 误调 `eda_run_simulation` 跑错 chip | 中 | 中 | 工具描述里写明「先 `eda_list_chips`」，permission 默认弹卡 |
-| `examples/eda-demo/` 的 VCD 解析阻塞主线程 | 低 | 低 | VCD > 1MB 时切到 worker thread（这一版不做，先 threshold 报警） |
+### 9.1 bbdev/mcp 与 nix 的全局耦合
+
+bbdev 必须 `nix develop --command` 才能跑。意味着：
+
+- Windows 用户装 nix 是先决条件（BBOS 已经假设这条，不算新约束）
+- macOS 上 nix shell 会显著拖慢首调（实测 ~10s）；后续调用命中缓存可接受
+
+**缓解**：在 BB-Agent 启动时调一次 `bbdev_task_status("nonexistent")` 触发预热，UI 显示 "bbdev 预热中…"。
+
+### 9.2 Python stdIO 的脆弱性
+
+mcpManager 用 stdIO 跟 Python 通信。Python 进程的 stderr 噪音、print 调试都可能污染 stdIO 协议。
+
+**缓解**：bbdev/mcp 的 `common._log()` 已经写 `file=sys.stderr, flush=True`，**协议通道是 stdout**。我们在 BB-Agent 端只解析 stdout 的 JSON-RPC，stderr 直接进 log。但需要验证一些调试 print 没意外写 stdout。
+
+### 9.3 stream_logs 的格式约定
+
+`stream_logs` 依赖 `bbdev/server.log` 行里能找到 `[<trace_id>]` 前缀。bbdev 当前是否真的有这个约定？**需要确认**。如果没，需要：
+
+- 给 bbdev 提 PR，加 trace_id 前缀
+- 或者改用 state_store.db 增量轮询（类似 task_status 但带 chunks）
+
+### 9.4 chat 中 LLM 调 MCP 与 GUI 调 MCP 的隔离
+
+LLM 在 chat 里也能调 `bbdev_stream_logs`。如果用户在 chat 里跑任务、GUI 那边又点 Run，**两个 trace_id 不一样**——目前没有 UI 把 chat 里的 trace 接到 RunPanel 里。这是 UX 问题，本期不做。
+
+### 9.5 取消语义
+
+`bbdev_task_cancel` 在 bbdev/mcp 里只标记状态，**真正杀掉子进程**要等 bbdev 自己的 cancel 实现。短期可能只是"软取消"——UI 要明确显示"取消请求已发送"，不是"已终止"。
+
+### 9.6 cwd 写死
+
+`resources/mcp.json` 当前 `cwd: d:/acode/buckyball` 是开发机值。生产环境应该跟用户 workspace 走——这是 BBOS 整体的 workspace 抽象问题，留给 v3。
 
 ---
 
-## 12. 相关文档 / 锚点
+## 10. 与上一版的关键差异
 
-- [`bbos/INTEGRATION.md`](../INTEGRATION.md) — 三方契约总览
-- [`bbos/design/backend/spec.md`](./backend/spec.md) — bb-server 完整规格（要补 §6 引用本文 §3）
-- [`bbos/backend/README.md`](../backend/README.md) — bb-server 当前实现状态（worker pool 待补）
-- [`bbos/agent/CLAUDE.md`](../agent/CLAUDE.md) — 工程约束（Vercel AI SDK、目录组织）
-- [`bbos/agent/docs/feature-inventory.md`](../agent/docs/feature-inventory.md) — Agent 全部能力清单
-- [`bbos/agent/src/main/bb/bridge.ts`](../agent/src/main/bb/bridge.ts) — 已有 bridge,本设计在此基础上扩展
-
----
-
-## 变更记录
-
-| 日期 | 变更 | 作者 |
+| 维度 | v1 (Rust bb-server) | v2 (纯 MCP) |
 |---|---|---|
-| 2026-09-29 | 初稿：bb-server ↔ agent ↔ EDA 三层集成,附实施步骤与开放问题 | — |
+| 进程数 | 3（agent / bb-server / bbdev）| 2（agent / bbdev/mcp） |
+| 语言栈 | TS + Rust + Python + Nix | TS + Python + Nix |
+| 端点协议 | HTTP + SSE + tRPC | stdIO MCP + tRPC |
+| LLM 工具名册 | 手动维护 wrapper | MCP 自动发现 |
+| 取消语义 | bb-server 控进程 | bbdev/mcp 透传到 bbdev |
+| 日志流 | SSE（`/api/jobs/:id/logs`）| MCP 轮询（`bbdev_stream_logs`） |
+| workspace 扫描 | Rust walk 盘 | Python glob 盘 |
+| 二进制分发 | electron-builder extraResources | 不需要打包 bbdev |
+| 文档章节 | 8 章 ~647 行 | 10 章 ~本文件 |
+
+---
+
+## 11. 相关文档
+
+- `bbos/design/dev.md` — BBOS 整体设计
+- `bbos/INTEGRATION.md` — 系统集成（v2 简版）
+- `bbdev/mcp/README.md`（待补）— bbdev/mcp 的工具清单
+- `bbdev/api/README.md`（待补）— bbdev HTTP API 表面
+
+---
+
+## 12. 编辑历史
+
+| 日期 | 版本 | 改动 |
+|---|---|---|
+| 2026-09-28 | v1 | 初稿，bb-server (Rust) + bbdev 双轨 |
+| 2026-09-29 | v2 | 退役 bb-server，bbdev/mcp 升为唯一网关 |
