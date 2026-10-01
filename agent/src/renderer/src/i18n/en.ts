@@ -700,4 +700,214 @@ export const en: typeof zh = {
       noContent: 'No content.',
     },
   },
+  /**
+   * GUI(EDA workbench)strings. See zh.ts for the key layout — zh is the shape.
+   */
+  gui: {
+    topbar: {
+      home: 'Home',
+      edaWorkbench: 'EDA Workbench',
+      settings: 'Settings',
+      langZh: '简体中文',
+      langEn: 'English',
+      tabs: {
+        overview: 'Overview',
+        chips: 'Chips',
+        balls: 'Balls',
+        waveforms: 'Waveforms',
+        advanced: 'Advanced',
+      },
+    },
+    common: {
+      agoShort: {
+        seconds: '{{n}}s ago',
+        minutes: '{{n}}m ago',
+        hours: '{{n}}h ago',
+        days: '{{n}}d ago',
+      },
+      recent: 'Recent',
+    },
+    overview: {
+      title: 'Overview',
+      currentChip: 'Current chip',
+      chipsCount: '{{count}} chips · bb-server mock',
+      activeJobs: 'Active Jobs',
+      traceIdPoll: 'trace_id poll · 1s',
+      noRunningJobs: 'No running jobs. Pick a ball on the Balls tab and run it.',
+      workflows: 'Workflows',
+      ballStageOverview: 'Ball Stage Overview',
+      ballsCount: '{{count}} balls · 5-stage gate',
+      stageLegend: {
+        green: 'green',
+        red: 'red (block)',
+        gray: 'gray (upstream not green)',
+      },
+      skills: {
+        chipDesigner: {
+          title: 'chip-designer',
+          subtitle: 'Design / modify a chip topology',
+          description:
+            'Explain why the current chip doesn\'t match → pick a topology → write chip.toml / designs/*.toml / tiles/*.toml',
+        },
+        ballAlign: {
+          title: 'ball-align',
+          subtitle: '5-stage gate pipeline',
+          description:
+            'Contract → C+BEMU → Compiler+MLIR → RTL → PPA+UVM. A downstream stage can\'t run until the upstream is green.',
+        },
+        waveform: {
+          title: 'waveform',
+          subtitle: 'VCD / FST cycle-level debugging',
+          description:
+            'open_waveform → list_signals → find_*_events / read_signal. Note: time_index is a sample point, not a clock cycle.',
+        },
+        fileExplorer: {
+          title: 'file-explorer',
+          subtitle: 'Edit toml / scala directly',
+          description: 'Tree-browse examples/chips/<chip>/configs/, for advanced users.',
+          openDrawer: 'Open file drawer',
+        },
+      },
+    },
+    chips: {
+      title: 'Chips',
+      count: '{{count}} chips · bb-server mock',
+      pickOne: 'Pick a chip to see its config.',
+      designsCores: '{{designs}} designs · {{cores}} cores',
+      production: 'production',
+      chipToml: {
+        title: 'chip.toml',
+        subtitle: 'Entry · selects designs + simulation configs',
+      },
+      designs: {
+        title: 'designs/*.toml',
+        subtitle: 'Each declares a tile set',
+      },
+      tiles: {
+        title: 'designs/tiles/*.toml',
+        subtitle: 'Each declares sharedMem + cores',
+      },
+      scalaTargets: 'Scala Targets',
+      scalaTargetsNote: 'All three targets must change — skip one and the build breaks. Required by the chip-designer skill.',
+      cores: 'Cores',
+      next: 'Next',
+      nextItems: [
+        'Wire trpc to read real toml + smol-toml parse (render a topology view)',
+        'Add a tile → core reference graph for inter-core SharedMem contracts',
+        'Add an edit button beside each target file, jumping to its git blob',
+      ],
+    },
+    balls: {
+      title: 'Balls',
+      count: '{{count}} · 5-stage gate',
+      pickOne: 'Pick a ball to see its 5-stage gate.',
+      corePrefix: 'core: {{core}}',
+      maintenance: 'maintenance core',
+      headerDesc: '5-stage gate pipeline. A downstream stage can\'t run until the upstream is green (enforced by the ball-align skill).',
+      stages: {
+        contract: 'Contract',
+        cbemu: 'C+BEMU',
+        compiler: 'Compiler+MLIR',
+        rtl: 'RTL',
+        ppauvm: 'PPA+UVM',
+      },
+      stageDescs: {
+        contract: 'ISA + element width + layout contract',
+        cbemu: 'C test + BEMU golden model',
+        compiler: 'MLIR test on BEMU',
+        rtl: 'Verilator small tests',
+        ppauvm: 'PPA + UVM verification',
+      },
+      jobsTitle: 'Jobs for {{name}}',
+      jobsEmpty: 'No jobs for this ball.',
+      waveformsLink: 'Waveforms',
+    },
+    waveforms: {
+      title: 'Waveforms',
+      count: '{{count}} files · VCD/FST',
+      filterChip: 'chip',
+      filterFmt: 'fmt',
+      noMatches: 'No matches.',
+      pickOne: 'Pick a VCD/FST.',
+      modifiedAt: 'modified {{time}}',
+      mcpCalls: 'waveform-mcp calls',
+      mcpMock: 'mock',
+      checksTitle: 'Common checks',
+      checks: [
+        { signal: 'cmdReq.valid && cmdReq.ready', desc: 'Command handshake' },
+        { signal: 'cmdResp.valid && cmdResp.ready', desc: 'Completion handshake' },
+        { signal: 'SRAM one-cycle latency', desc: 'req.fire → resp.valid next cycle' },
+        { signal: 'FSM state', desc: 'State register transitions around failing transactions' },
+        { signal: 'bank address / data', desc: 'Bank request addr/data on the corresponding clock edge' },
+      ],
+      calls: {
+        open: {
+          label: 'open_waveform',
+          args: 'file_path="{{path}}"',
+          desc: 'Open the waveform file, returns waveform_id',
+        },
+        list: {
+          label: 'list_signals',
+          args: 'waveform_id="<id>", recursive=true',
+          desc: 'List signal hierarchy — pass recursive explicitly, do not rely on defaults',
+        },
+        findCond: {
+          label: 'find_conditional_events',
+          args: 'waveform_id="<id>", condition="cmdReq.valid && cmdReq.ready"',
+          desc: 'Find handshake trigger points',
+        },
+        findSig: {
+          label: 'find_signal_events',
+          args: 'waveform_id="<id>", signal="clock", start_time_index=..., end_time_index=...',
+          desc: 'Find clock edges (time_index is a sample point, not a cycle)',
+        },
+        read: {
+          label: 'read_signal',
+          args: 'waveform_id="<id>", signal="...bus.data"',
+          desc: 'Read exact values',
+        },
+        close: {
+          label: 'close_waveform',
+          args: 'waveform_id="<id>"',
+          desc: 'Close after analysis to release the fd',
+        },
+      },
+      next: 'Next',
+      nextItems: [
+        'Wire trpc to scan bb-tests/build/sim/<chip>/ for real VCD/FST',
+        'Add an execute button beside each call to invoke the waveform-mcp tool',
+        'Add a waveform viewer preview (basic chart)',
+        'Signal search + favorites + time cursor (cycle ↔ time_index converter)',
+      ],
+    },
+    advanced: {
+      openHint: 'Open a .toml / .canvas / .vcd / .csv file from the Explorer to start editing.',
+    },
+    agent: {
+      you: 'You',
+      assistant: 'Agent',
+      inputPlaceholder: 'Ask the agent anything…',
+      attach: 'Attach file',
+      voice: 'Voice input',
+      send: 'Send',
+      goLive: 'Go Live',
+      activate: 'Activate',
+      agentState: 'Agent State: {{count}}/{{max}} ({{pct}}%)',
+      tokenUsage: '{{used}}fa {{pct}}%',
+      intro:
+          "I'm the EDA Agent — I can edit chip.toml, run a 5-stage gate, and read VCD waveforms.\nFor example: \"change toy's nTiles to 4\" or \"show me the failing ball at RTL stage\".",
+      models: {
+        'sonnet-5-high': 'Claude Sonnet 5 High',
+        'sonnet-4.5': 'Claude Sonnet 4.5',
+        'opus-4': 'Claude Opus 4',
+        'haiku-4': 'Claude Haiku 4',
+      },
+      modelDescs: {
+        'sonnet-5-high': 'Latest · strong reasoning',
+        'sonnet-4.5': 'Balanced speed/quality',
+        'opus-4': 'Maximum quality',
+        'haiku-4': 'Fastest · lowest cost',
+      },
+    },
+  },
 };

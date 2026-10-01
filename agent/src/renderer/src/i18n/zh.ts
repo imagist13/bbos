@@ -693,4 +693,227 @@ export const zh = {
       noContent: '无内容。',
     },
   },
+  /**
+   * GUI(EDA 工作台)文案 —— 5 个 tab + 右侧 Agent 面板。
+   *
+   * 字符串分组约定:
+   *   topbar         顶部 chrome(Home / tab 名 / 语言切换 / Settings)
+   *   common         各 tab 共用(豹纹、相对时间)
+   *   overview       Overview tab
+   *   chips          Chips tab
+   *   balls          Balls tab
+   *   waveforms      Waveforms tab
+   *   advanced       Advanced tab
+   *   agent          右侧 Agent 面板
+   *
+   * 代码/路径/枚举字面值(stage 名 "Contract" 等)双语统一,只有用户面文案走 i18n。
+   */
+  gui: {
+    topbar: {
+      home: 'Home',
+      edaWorkbench: 'EDA Workbench',
+      settings: 'Settings',
+      langZh: '简体中文',
+      langEn: 'English',
+      tabs: {
+        overview: 'Overview',
+        chips: 'Chips',
+        balls: 'Balls',
+        waveforms: 'Waveforms',
+        advanced: 'Advanced',
+      },
+    },
+    common: {
+      /** 相对时间,Xs/Xm/Xh/Xd ago。Waveforms/Overview/Balls 都用。 */
+      agoShort: {
+        seconds: '{{n}}s ago',
+        minutes: '{{n}}m ago',
+        hours: '{{n}}h ago',
+        days: '{{n}}d ago',
+      },
+      recent: 'Recent',
+    },
+    overview: {
+      title: 'Overview',
+      currentChip: '当前 chip',
+      chipsCount: '{{count}} 个 chip · bb-server mock',
+      activeJobs: 'Active Jobs',
+      traceIdPoll: 'trace_id poll · 1s',
+      noRunningJobs: 'No running jobs。切到 Balls 页选一个 ball 跑起来。',
+      workflows: 'Workflows',
+      ballStageOverview: 'Ball Stage Overview',
+      ballsCount: '{{count}} 个 ball · 5-stage gate',
+      stageLegend: {
+        green: 'green',
+        red: 'red (block)',
+        gray: 'gray (上游未绿)',
+      },
+      skills: {
+        chipDesigner: {
+          title: 'chip-designer',
+          subtitle: '设计 / 修改一个 chip 的 topology',
+          description:
+            '解释为什么现有 chip 不匹配 → 选 topology → 写 chip.toml / designs/*.toml / tiles/*.toml',
+        },
+        ballAlign: {
+          title: 'ball-align',
+          subtitle: '5-stage gate pipeline',
+          description:
+            'Contract → C+BEMU → Compiler+MLIR → RTL → PPA+UVM。上一节未绿,下一节不能走。',
+        },
+        waveform: {
+          title: 'waveform',
+          subtitle: 'VCD / FST cycle-level 调试',
+          description:
+            'open_waveform → list_signals → find_*_events / read_signal。注意时间是采样点,不是 clock。',
+        },
+        fileExplorer: {
+          title: 'file-explorer',
+          subtitle: '直接编辑 toml / scala',
+          description: 'examples/chips/<chip>/configs/ 树形浏览,advanced 用户用。',
+          openDrawer: '打开文件抽屉',
+        },
+      },
+    },
+    chips: {
+      title: 'Chips',
+      count: '{{count}} 个 chip · bb-server mock',
+      pickOne: '选一个 chip 看 config。',
+      designsCores: '{{designs}} designs · {{cores}} cores',
+      production: 'production',
+      chipToml: {
+        title: 'chip.toml',
+        subtitle: 'Entry · selects designs + simulation configs',
+      },
+      designs: {
+        title: 'designs/*.toml',
+        subtitle: 'Each declares a tile set',
+      },
+      tiles: {
+        title: 'designs/tiles/*.toml',
+        subtitle: 'Each declares sharedMem + cores',
+      },
+      scalaTargets: 'Scala Targets',
+      scalaTargetsNote: '三个 target 都得改,缺一个就 build 不起来。chip-designer skill 强制要求。',
+      cores: 'Cores',
+      next: 'Next',
+      nextItems: [
+        '接 trpc 读真实 toml 内容 + smol-toml 解析(展示 topology 视图)',
+        '加 tile → core 引用图,可视化 inter-core SharedMem contract',
+        '每个 target 文件旁加 edit 按钮,跳到对应 git blob',
+      ],
+    },
+    balls: {
+      title: 'Balls',
+      count: '{{count}} 个 · 5-stage gate',
+      pickOne: '选一个 ball 看 5-stage gate。',
+      corePrefix: 'core: {{core}}',
+      maintenance: 'maintenance core',
+      headerDesc: '5-stage gate pipeline。上一节未绿,下一节不能走(ball-align skill 强制)。',
+      stages: {
+        contract: 'Contract',
+        cbemu: 'C+BEMU',
+        compiler: 'Compiler+MLIR',
+        rtl: 'RTL',
+        ppauvm: 'PPA+UVM',
+      },
+      stageDescs: {
+        contract: 'ISA + element width + layout contract',
+        cbemu: 'C test + BEMU golden model',
+        compiler: 'MLIR test on BEMU',
+        rtl: 'Verilator small tests',
+        ppauvm: 'PPA + UVM verification',
+      },
+      jobsTitle: '{{ball.name}} 的 jobs',
+      jobsEmpty: '没有该 ball 的 jobs。',
+      waveformsLink: 'Waveforms',
+    },
+    waveforms: {
+      title: 'Waveforms',
+      count: '{{count}} 个文件 · VCD/FST',
+      filterChip: 'chip',
+      filterFmt: 'fmt',
+      noMatches: 'No matches.',
+      pickOne: '选一个 VCD/FST。',
+      modifiedAt: 'modified {{time}}',
+      mcpCalls: 'waveform-mcp calls',
+      mcpMock: 'mock',
+      checksTitle: '常用检查项',
+      checks: [
+        { signal: 'cmdReq.valid && cmdReq.ready', desc: '命令握手' },
+        { signal: 'cmdResp.valid && cmdResp.ready', desc: '完成握手' },
+        { signal: 'SRAM 一周期延迟', desc: 'req.fire → 下一拍 resp.valid' },
+        { signal: 'FSM 状态机', desc: '失败事务周围的状态寄存器 转换' },
+        { signal: 'bank 地址/数据', desc: 'bank 请求 addr/data 在 对应 clock 边的值' },
+      ],
+      calls: {
+        open: {
+          label: 'open_waveform',
+          args: 'file_path="{{path}}"',
+          desc: '打开波形文件,返回 waveform_id',
+        },
+        list: {
+          label: 'list_signals',
+          args: 'waveform_id="<id>", recursive=true',
+          desc: '列出信号层级 —— 显式传 recursive,不依赖默认',
+        },
+        findCond: {
+          label: 'find_conditional_events',
+          args: 'waveform_id="<id>", condition="cmdReq.valid && cmdReq.ready"',
+          desc: '查 handshake 触发点',
+        },
+        findSig: {
+          label: 'find_signal_events',
+          args: 'waveform_id="<id>", signal="clock", start_time_index=..., end_time_index=...',
+          desc: '找 clock 边沿(时间索引是采样点,不是 cycle)',
+        },
+        read: {
+          label: 'read_signal',
+          args: 'waveform_id="<id>", signal="...bus.data"',
+          desc: '读精确值',
+        },
+        close: {
+          label: 'close_waveform',
+          args: 'waveform_id="<id>"',
+          desc: '分析完关闭,释放 fd',
+        },
+      },
+      next: 'Next',
+      nextItems: [
+        '接 trpc 扫 bb-tests/build/sim/<chip>/ 找真实 VCD/FST',
+        '每个 call 旁边加执行按钮,直接调 waveform-mcp 工具',
+        '加 waveform viewer 预览(基础波形图)',
+        '信号搜索 + 收藏 + 时间游标(cycle ↔ time_index 转换器)',
+      ],
+    },
+    advanced: {
+      openHint: '从 Explorer 打开一个 .toml / .canvas / .vcd / .csv 文件开始编辑。',
+    },
+    agent: {
+      you: 'You',
+      assistant: 'Agent',
+      inputPlaceholder: '跟 Agent 说点什么…',
+      attach: '附加文件',
+      voice: '语音输入',
+      send: '发送',
+      goLive: 'Go Live',
+      activate: '激活',
+      agentState: 'Agent State: {{count}}/{{max}} ({{pct}}%)',
+      tokenUsage: '{{used}}fa {{pct}}%',
+      intro:
+        '我是 EDA Agent —— 可以帮你改 chip.toml、跑 5-stage gate、读 VCD 波形。\n例如:"把 toy 的 nTiles 改成 4" 或 "show me the failing ball at RTL stage"。',
+      models: {
+        'sonnet-5-high': 'Claude Sonnet 5 High',
+        'sonnet-4.5': 'Claude Sonnet 4.5',
+        'opus-4': 'Claude Opus 4',
+        'haiku-4': 'Claude Haiku 4',
+      },
+      modelDescs: {
+        'sonnet-5-high': '最新 · 强推理',
+        'sonnet-4.5': '平衡速度/质量',
+        'opus-4': '最强质量',
+        'haiku-4': '最快 · 低成本',
+      },
+    },
+  },
 };

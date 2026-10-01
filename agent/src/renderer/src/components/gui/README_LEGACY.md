@@ -23,5 +23,4 @@ v0.4 阶段曾被打到 `_legacy/`(死代码,edapage 主流程不引),v0.5 移�
 
 ## 注
 
-- `EDARightPanel.tsx` 仍在 `gui/` 顶层但未挂载(AdvancedPage 不使用)。
-  留作 v0.5+ 引入 EDA Chat 时的复用模板,删之前先 grep 确认无引用。
+- `EDARightPanel.tsx` 已在 v0.5 由 `gui/agent/AgentPanel.tsx` 取代,已删除。

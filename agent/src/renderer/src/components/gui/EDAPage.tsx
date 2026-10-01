@@ -37,19 +37,20 @@ import { ChipsPage } from './edaStudio/pages/ChipsPage';
 import { OverviewPage } from './edaStudio/pages/OverviewPage';
 import { WaveformsPage } from './edaStudio/pages/WaveformsPage';
 import { AdvancedPage } from './edaStudio/pages/AdvancedPage';
+import { AgentPanel } from './agent/AgentPanel';
 
-/** 顶部 tab 定义 —— 顺序就是水平 nav 顺序,5 个 tab 是 v0.4 设计上限。 */
-const TABS: ReadonlyArray<{ key: StudioPage; label: string }> = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'chips', label: 'Chips' },
-  { key: 'balls', label: 'Balls' },
-  { key: 'waveforms', label: 'Waveforms' },
-  { key: 'advanced', label: 'Advanced' },
+/** 顶部 tab 定义 —— key 是 store key,label 走 i18n。 */
+const TAB_KEYS: ReadonlyArray<StudioPage> = [
+  'overview',
+  'chips',
+  'balls',
+  'waveforms',
+  'advanced',
 ];
 
 export function EDAPage(): React.JSX.Element {
   const navigate = useNavigate();
-  const { i18n } = useTranslation();
+  const { i18n, t } = useTranslation();
   const activePage = useStudioStore((s) => s.activePage);
   const setActivePage = useStudioStore((s) => s.setActivePage);
   const workspace = useStudioStore((s) => s.workspace);
@@ -80,32 +81,32 @@ export function EDAPage(): React.JSX.Element {
             className="flex h-7 items-center gap-1 rounded-md px-2 text-fg-secondary text-xs hover:bg-surface-strong hover:text-fg-primary"
           >
             <span>‹</span>
-            <span>Home</span>
+            <span>{t('gui.topbar.home')}</span>
           </button>
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-accent font-bold text-fg-on-accent text-xs">
             <Cpu className="size-[14px]" />
           </div>
-          <span className="font-semibold text-sm">EDA Workbench</span>
+          <span className="font-semibold text-sm">{t('gui.topbar.edaWorkbench')}</span>
           <span className="rounded-full bg-elevated px-2 py-0.5 text-fg-tertiary text-[10px]">
-            v0.4
+            v0.5
           </span>
         </div>
 
         <nav className="ml-6 flex h-full items-center gap-1 border-border-default border-l pl-6">
-          {TABS.map((tab) => {
-            const active = activePage === tab.key;
+          {TAB_KEYS.map((key) => {
+            const active = activePage === key;
             return (
               <button
-                key={tab.key}
+                key={key}
                 type="button"
-                onClick={() => setActivePage(tab.key)}
+                onClick={() => setActivePage(key)}
                 className={
                   active
                     ? 'flex h-8 items-center rounded-md bg-elevated px-3 font-medium text-fg-primary text-xs'
                     : 'flex h-8 items-center rounded-md px-3 text-fg-secondary text-xs hover:bg-surface-strong hover:text-fg-primary'
                 }
               >
-                {tab.label}
+                {t(`gui.topbar.tabs.${key}`)}
               </button>
             );
           })}
@@ -126,11 +127,12 @@ export function EDAPage(): React.JSX.Element {
             className="flex items-center gap-1.5 rounded-md border border-border-default bg-canvas px-3 py-1.5 font-medium text-fg-primary text-xs hover:bg-surface-strong"
           >
             <Globe2 className="size-[13px]" />
-            {isZh ? '简体中文' : 'English'}
+            {isZh ? t('gui.topbar.langZh') : t('gui.topbar.langEn')}
           </button>
           <button
             type="button"
-            aria-label="Settings"
+            aria-label={t('gui.topbar.settings')}
+            title={t('gui.topbar.settings')}
             className="flex h-7 w-7 items-center justify-center rounded-md text-fg-tertiary hover:bg-surface-strong hover:text-fg-primary"
           >
             <Settings className="size-[13px]" />
@@ -141,6 +143,7 @@ export function EDAPage(): React.JSX.Element {
       {/* ---- Body ---- */}
       <main className="flex min-h-0 flex-1 overflow-hidden">
         <StudioPageHost page={activePage} />
+        <AgentPanel />
       </main>
     </div>
   );

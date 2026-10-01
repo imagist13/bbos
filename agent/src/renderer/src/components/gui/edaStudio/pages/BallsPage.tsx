@@ -26,19 +26,20 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 
 import { MOCK_BALLS, MOCK_JOBS, type BallInfo, type StageStatus } from '../bb-mock';
 import { useStudioStore } from '../../../../state/eda-studio-store';
 
-const STAGE_LABELS = [
-  { idx: 0, label: 'Contract', desc: 'ISA + element width + layout contract' },
-  { idx: 1, label: 'C+BEMU', desc: 'C test + BEMU golden model' },
-  { idx: 2, label: 'Compiler+MLIR', desc: 'MLIR test on BEMU' },
-  { idx: 3, label: 'RTL', desc: 'Verilator small tests' },
-  { idx: 4, label: 'PPA+UVM', desc: 'PPA + UVM verification' },
-] as const;
+/**
+ * 5 个 stage 的 i18n key —— 跟 OverviewPage 的表头共用 `gui.balls.stages.*`。
+ * 顺序就是 stage 0-4 的横排顺序。
+ */
+const STAGE_KEYS = ['contract', 'cbemu', 'compiler', 'rtl', 'ppauvm'] as const;
 
 export function BallsPage(): React.JSX.Element {
+  const { t } = useTranslation();
   const currentBall = useStudioStore((s) => s.currentBall);
   const setCurrentBall = useStudioStore((s) => s.setCurrentBall);
 
@@ -54,9 +55,9 @@ export function BallsPage(): React.JSX.Element {
       {/* 左侧 ball 列表 */}
       <aside className="flex w-60 flex-shrink-0 flex-col overflow-y-auto border-border-default border-r bg-surface">
         <div className="border-border-default border-b px-4 py-3">
-          <h2 className="font-medium text-fg-primary text-sm">Balls</h2>
+          <h2 className="font-medium text-fg-primary text-sm">{t('gui.balls.title')}</h2>
           <p className="mt-0.5 text-fg-tertiary text-[11px]">
-            {MOCK_BALLS.length} 个 · 5-stage gate
+            {t('gui.balls.count', { count: MOCK_BALLS.length })}
           </p>
         </div>
         <ul className="flex flex-col">
@@ -81,7 +82,7 @@ export function BallsPage(): React.JSX.Element {
                       <StageDotMini status={worstStatus} />
                     </div>
                     <span className="truncate text-fg-tertiary text-[10px]">
-                      core: {b.core}
+                      {t('gui.balls.corePrefix', { core: b.core })}
                     </span>
                   </div>
                 </button>
@@ -95,7 +96,7 @@ export function BallsPage(): React.JSX.Element {
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         {!ball ? (
           <div className="flex flex-1 items-center justify-center text-fg-tertiary text-sm">
-            选一个 ball 看 5-stage gate。
+            {t('gui.balls.pickOne')}
           </div>
         ) : (
           <BallDetail ball={ball} />
@@ -108,27 +109,26 @@ export function BallsPage(): React.JSX.Element {
 // ---------------------------------------------------------------------------
 
 function BallDetail({ ball }: { ball: BallInfo }): React.JSX.Element {
+  const { t } = useTranslation();
   const setActivePage = useStudioStore((s) => s.setActivePage);
   const ballJobs = MOCK_JOBS.filter((j) => j.command?.includes(ball.name) ?? false);
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-6">
+    <div className="flex w-full min-w-0 flex-col gap-6 px-6 py-6">
       <header className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
           <Boxes className="size-[18px] text-accent" />
           <h1 className="font-mono font-semibold text-fg-primary text-xl">{ball.name}</h1>
           <span className="rounded-full bg-elevated px-2 py-0.5 text-fg-tertiary text-[10px] uppercase">
-            core: {ball.core}
+            {t('gui.balls.corePrefix', { core: ball.core })}
           </span>
           {ball.core === 'toy' && (
             <span className="rounded-full bg-status-warning/15 px-2 py-0.5 text-[10px] text-status-warning uppercase">
-              maintenance core
+              {t('gui.balls.maintenance')}
             </span>
           )}
         </div>
-        <p className="text-fg-tertiary text-xs">
-          5-stage gate pipeline.上一节未绿,下一节不能走(ball-align skill 强制)。
-        </p>
+        <p className="text-fg-tertiary text-xs">{t('gui.balls.headerDesc')}</p>
       </header>
 
       {/* 5-stage 横排大圆点 */}
@@ -152,7 +152,7 @@ function BallDetail({ ball }: { ball: BallInfo }): React.JSX.Element {
                   S{s.stage}
                 </span>
                 <span className="text-fg-tertiary text-[11px]">
-                  {STAGE_LABELS[i]?.label}
+                  {t(`gui.balls.stages.${STAGE_KEYS[i] ?? 'contract'}`)}
                 </span>
               </div>
               {i < ball.stages.length - 1 && (
@@ -172,13 +172,12 @@ function BallDetail({ ball }: { ball: BallInfo }): React.JSX.Element {
       {/* 每个 stage 的详情卡 */}
       <section className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
         {ball.stages.map((s, i) => {
-          const label = STAGE_LABELS[i];
-          if (!label) return null;
+          const key = STAGE_KEYS[i];
+          if (!key) return null;
           return (
             <StageCard
               key={s.stage}
-              label={label.label}
-              desc={label.desc}
+              stageKey={key}
               status={s.status}
               note={s.note}
             />
@@ -189,17 +188,19 @@ function BallDetail({ ball }: { ball: BallInfo }): React.JSX.Element {
       {/* 本 ball 的 jobs */}
       <section className="rounded-lg border border-border-default bg-surface p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-medium text-fg-primary text-sm">Jobs for {ball.name}</h3>
+          <h3 className="font-medium text-fg-primary text-sm">
+            {t('gui.balls.jobsTitle', { name: ball.name })}
+          </h3>
           <button
             type="button"
             onClick={() => setActivePage('waveforms')}
             className="flex items-center gap-1 text-accent text-xs hover:underline"
           >
-            <ExternalLink className="size-[12px]" /> Waveforms
+            <ExternalLink className="size-[12px]" /> {t('gui.balls.waveformsLink')}
           </button>
         </div>
         {ballJobs.length === 0 ? (
-          <p className="text-fg-tertiary text-xs">没有该 ball 的 jobs。</p>
+          <p className="text-fg-tertiary text-xs">{t('gui.balls.jobsEmpty')}</p>
         ) : (
           <ul className="flex flex-col gap-2">
             {ballJobs.map((job) => (
@@ -222,7 +223,7 @@ function BallDetail({ ball }: { ball: BallInfo }): React.JSX.Element {
                     <span className="font-mono">{job.id}</span>
                     <span>·</span>
                     <Clock className="size-[11px]" />
-                    <span>{formatAge(job.finishedAt ?? job.createdAt)}</span>
+                    <span>{formatAge(t, job.finishedAt ?? job.createdAt)}</span>
                   </div>
                 </div>
               </li>
@@ -235,16 +236,15 @@ function BallDetail({ ball }: { ball: BallInfo }): React.JSX.Element {
 }
 
 function StageCard({
-  label,
-  desc,
+  stageKey,
   status,
   note,
 }: {
-  label: string;
-  desc: string;
+  stageKey: (typeof STAGE_KEYS)[number];
   status: StageStatus;
   note?: string;
 }): React.JSX.Element {
+  const { t } = useTranslation();
   const border =
     status === 'green'
       ? 'border-status-success/40 bg-status-success/5'
@@ -260,12 +260,16 @@ function StageCard({
   return (
     <div className={`flex flex-col gap-2 rounded-lg border p-3 ${border}`}>
       <div className="flex items-center justify-between">
-        <span className="font-mono font-medium text-fg-primary text-xs">{label}</span>
+        <span className="font-mono font-medium text-fg-primary text-xs">
+          {t(`gui.balls.stages.${stageKey}`)}
+        </span>
         <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase ${badge}`}>
           {status}
         </span>
       </div>
-      <p className="text-fg-tertiary text-[11px] leading-relaxed">{desc}</p>
+      <p className="text-fg-tertiary text-[11px] leading-relaxed">
+        {t(`gui.balls.stageDescs.${stageKey}`)}
+      </p>
       {note && <p className="text-fg-secondary text-[11px] leading-relaxed">{note}</p>}
     </div>
   );
@@ -290,10 +294,10 @@ function worstStage(ball: BallInfo): StageStatus {
   return 'gray';
 }
 
-function formatAge(iso: string): string {
+function formatAge(t: TFunction, iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
-  if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
-  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
-  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
-  return `${Math.floor(ms / 86_400_000)}d ago`;
+  if (ms < 60_000) return t('gui.common.agoShort.seconds', { n: Math.floor(ms / 1000) });
+  if (ms < 3_600_000) return t('gui.common.agoShort.minutes', { n: Math.floor(ms / 60_000) });
+  if (ms < 86_400_000) return t('gui.common.agoShort.hours', { n: Math.floor(ms / 3_600_000) });
+  return t('gui.common.agoShort.days', { n: Math.floor(ms / 86_400_000) });
 }

@@ -29,10 +29,13 @@ import {
   Search,
   Waves,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 
 import { MOCK_WAVEFORMS, type WaveformFile } from '../bb-mock';
 
 export function WaveformsPage(): React.JSX.Element {
+  const { t } = useTranslation();
   const [selected, setSelected] = useState<WaveformFile | null>(null);
   const [chipFilter, setChipFilter] = useState<string>('all');
   const [formatFilter, setFormatFilter] = useState<'all' | 'vcd' | 'fst'>('all');
@@ -50,24 +53,24 @@ export function WaveformsPage(): React.JSX.Element {
   );
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="flex h-full w-full min-h-0 grow flex-row">
       {/* 左侧文件列表 */}
       <aside className="flex w-80 flex-shrink-0 flex-col overflow-hidden border-border-default border-r bg-surface">
         <div className="border-border-default border-b px-4 py-3">
-          <h2 className="font-medium text-fg-primary text-sm">Waveforms</h2>
+          <h2 className="font-medium text-fg-primary text-sm">{t('gui.waveforms.title')}</h2>
           <p className="mt-0.5 text-fg-tertiary text-[11px]">
-            {MOCK_WAVEFORMS.length} 个文件 · VCD/FST
+            {t('gui.waveforms.count', { count: MOCK_WAVEFORMS.length })}
           </p>
           {/* filter */}
           <div className="mt-3 flex gap-2">
             <FilterSelect
-              label="chip"
+              label={t('gui.waveforms.filterChip')}
               value={chipFilter}
               options={['all', ...chips]}
               onChange={setChipFilter}
             />
             <FilterSelect
-              label="fmt"
+              label={t('gui.waveforms.filterFmt')}
               value={formatFilter}
               options={['all', 'vcd', 'fst']}
               onChange={setFormatFilter}
@@ -110,7 +113,9 @@ export function WaveformsPage(): React.JSX.Element {
             );
           })}
           {filtered.length === 0 && (
-            <li className="px-4 py-6 text-center text-fg-tertiary text-xs">No matches.</li>
+            <li className="px-4 py-6 text-center text-fg-tertiary text-xs">
+              {t('gui.waveforms.noMatches')}
+            </li>
           )}
         </ul>
       </aside>
@@ -119,7 +124,7 @@ export function WaveformsPage(): React.JSX.Element {
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         {!selected ? (
           <div className="flex flex-1 items-center justify-center text-fg-tertiary text-sm">
-            选一个 VCD/FST。
+            {t('gui.waveforms.pickOne')}
           </div>
         ) : (
           <WaveformDetail wf={selected} />
@@ -130,9 +135,18 @@ export function WaveformsPage(): React.JSX.Element {
 }
 
 function WaveformDetail({ wf }: { wf: WaveformFile }): React.JSX.Element {
+  const { t } = useTranslation();
   const sizeKb = (wf.sizeBytes / 1024).toFixed(0);
+  const calls = (key: 'open' | 'list' | 'findCond' | 'findSig' | 'read' | 'close') => {
+    const c = t(`gui.waveforms.calls.${key}`, { returnObjects: true }) as {
+      label: string;
+      args: string;
+      desc: string;
+    };
+    return c;
+  };
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-6 py-6">
+    <div className="flex w-full min-w-0 grow flex-col items-stretch gap-6 self-stretch px-6 py-6">
       <header className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
           <Waves className="size-[18px] text-accent" />
@@ -157,7 +171,7 @@ function WaveformDetail({ wf }: { wf: WaveformFile }): React.JSX.Element {
             </>
           )}
           <span>·</span>
-          <span>modified {formatTime(wf.modifiedAt)}</span>
+          <span>{t('gui.waveforms.modifiedAt', { time: formatAge(t, wf.modifiedAt) })}</span>
         </div>
       </header>
 
@@ -165,41 +179,37 @@ function WaveformDetail({ wf }: { wf: WaveformFile }): React.JSX.Element {
       <section className="rounded-lg border border-border-default bg-surface">
         <header className="flex items-center gap-2 border-border-default border-b px-4 py-2.5">
           <Play className="size-[14px] text-accent" />
-          <h3 className="font-medium text-fg-primary text-sm">waveform-mcp calls</h3>
+          <h3 className="font-medium text-fg-primary text-sm">{t('gui.waveforms.mcpCalls')}</h3>
           <span className="ml-auto rounded-full bg-status-warning/15 px-2 py-0.5 text-[10px] text-status-warning uppercase">
-            mock
+            {t('gui.waveforms.mcpMock')}
           </span>
         </header>
         <ul className="flex flex-col">
           <McpCallRow
-            label="open_waveform"
-            args={`file_path="${wf.path}"`}
-            desc="打开波形文件,返回 waveform_id"
+            label={calls('open').label}
+            args={t('gui.waveforms.calls.open.args', { path: wf.path })}
+            desc={calls('open').desc}
+          />
+          <McpCallRow label={calls('list').label} args={calls('list').args} desc={calls('list').desc} />
+          <McpCallRow
+            label={calls('findCond').label}
+            args={calls('findCond').args}
+            desc={calls('findCond').desc}
           />
           <McpCallRow
-            label="list_signals"
-            args={`waveform_id="<id>", recursive=true`}
-            desc="列出信号层级 —— 显式传 recursive,不依赖默认"
+            label={calls('findSig').label}
+            args={calls('findSig').args}
+            desc={calls('findSig').desc}
           />
           <McpCallRow
-            label="find_conditional_events"
-            args={`waveform_id="<id>", condition="cmdReq.valid && cmdReq.ready"`}
-            desc="查 handshake 触发点"
+            label={calls('read').label}
+            args={calls('read').args}
+            desc={calls('read').desc}
           />
           <McpCallRow
-            label="find_signal_events"
-            args={`waveform_id="<id>", signal="clock", start_time_index=..., end_time_index=...`}
-            desc="找 clock 边沿(时间索引是采样点,不是 cycle)"
-          />
-          <McpCallRow
-            label="read_signal"
-            args={`waveform_id="<id>", signal="...bus.data"`}
-            desc="读精确值"
-          />
-          <McpCallRow
-            label="close_waveform"
-            args={`waveform_id="<id>"`}
-            desc="分析完关闭,释放 fd"
+            label={calls('close').label}
+            args={calls('close').args}
+            desc={calls('close').desc}
           />
         </ul>
       </section>
@@ -208,40 +218,26 @@ function WaveformDetail({ wf }: { wf: WaveformFile }): React.JSX.Element {
       <section className="rounded-lg border border-border-default bg-surface p-4">
         <h3 className="mb-3 flex items-center gap-2 font-medium text-fg-primary text-sm">
           <AlertCircle className="size-[14px] text-status-warning" />
-          常用检查项
+          {t('gui.waveforms.checksTitle')}
         </h3>
         <ul className="space-y-1.5 text-fg-secondary text-xs">
-          <li>
-            <span className="font-mono text-fg-primary">cmdReq.valid &amp;&amp; cmdReq.ready</span> —
-            命令握手
-          </li>
-          <li>
-            <span className="font-mono text-fg-primary">cmdResp.valid &amp;&amp; cmdResp.ready</span> —
-            完成握手
-          </li>
-          <li>
-            <span className="font-mono text-fg-primary">SRAM 一周期延迟</span> — req.fire → 下一拍
-            resp.valid
-          </li>
-          <li>
-            <span className="font-mono text-fg-primary">FSM 状态机</span> — 失败事务周围的状态寄存器
-            转换
-          </li>
-          <li>
-            <span className="font-mono text-fg-primary">bank 地址/数据</span> — bank 请求 addr/data 在
-            对应 clock 边的值
-          </li>
+          {t('gui.waveforms.checks', { returnObjects: true }).map((c: { signal: string; desc: string }, i: number) => (
+            <li key={i}>
+              <span className="font-mono text-fg-primary">{c.signal}</span> — {c.desc}
+            </li>
+          ))}
         </ul>
       </section>
 
       {/* TODO banner */}
       <section className="rounded-lg border border-border-default border-dashed bg-canvas p-4">
-        <h3 className="mb-2 font-medium text-fg-secondary text-xs uppercase tracking-wide">Next</h3>
+        <h3 className="mb-2 font-medium text-fg-secondary text-xs uppercase tracking-wide">
+          {t('gui.waveforms.next')}
+        </h3>
         <ul className="space-y-1 text-fg-tertiary text-xs">
-          <li>· 接 trpc 扫 bb-tests/build/sim/&lt;chip&gt;/ 找真实 VCD/FST</li>
-          <li>· 每个 call 旁边加执行按钮,直接调 waveform-mcp 工具</li>
-          <li>· 加 waveform viewer 预览(基础波形图)</li>
-          <li>· 信号搜索 + 收藏 + 时间游标(cycle ↔ time_index 转换器)</li>
+          {t('gui.waveforms.nextItems', { returnObjects: true }).map((item: string, i: number) => (
+            <li key={i}>· {item}</li>
+          ))}
         </ul>
       </section>
     </div>
@@ -298,13 +294,16 @@ function FilterSelect<T extends string>({
   );
 }
 
-function formatTime(iso: string): string {
+function formatTime(t: TFunction, iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
-  if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
-  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
-  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
-  return `${Math.floor(ms / 86_400_000)}d ago`;
+  if (ms < 60_000) return t('gui.common.agoShort.seconds', { n: Math.floor(ms / 1000) });
+  if (ms < 3_600_000) return t('gui.common.agoShort.minutes', { n: Math.floor(ms / 60_000) });
+  if (ms < 86_400_000) return t('gui.common.agoShort.hours', { n: Math.floor(ms / 3_600_000) });
+  return t('gui.common.agoShort.days', { n: Math.floor(ms / 86_400_000) });
 }
+
+// backwards-compat alias while file evolves
+const formatAge = formatTime;
 
 // re-export Search so it can be picked up by tooling that scans for unused imports
 export { Search };

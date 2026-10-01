@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { trpc } from '../../../../lib/trpc';
 import { useStudioStore } from '../../../../state/eda-studio-store';
@@ -27,6 +28,7 @@ function newId(path: string): string {
 }
 
 export function AdvancedPage(): React.JSX.Element {
+  const { t } = useTranslation();
   const workspace = useStudioStore((s) => s.workspace);
   const setWorkspace = useStudioStore((s) => s.setWorkspace);
 
@@ -158,7 +160,7 @@ export function AdvancedPage(): React.JSX.Element {
             />
           ) : (
             <div className="flex h-full items-center justify-center px-6 text-center text-fg-tertiary text-sm">
-              Open a .toml / .canvas / .vcd / .csv file from the Explorer to start editing.
+              {t('gui.advanced.openHint')}
             </div>
           )}
         </div>

@@ -27,11 +27,13 @@
 
 import { ChevronRight, Cpu, FileCode2, Folder, Layers } from 'lucide-react';
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { MOCK_CHIPS, MOCK_WORKSPACES, type WorkspaceInfo } from '../bb-mock';
 import { useStudioStore } from '../../../../state/eda-studio-store';
 
 export function ChipsPage(): React.JSX.Element {
+  const { t } = useTranslation();
   const currentChip = useStudioStore((s) => s.currentChip);
   const setCurrentChip = useStudioStore((s) => s.setCurrentChip);
 
@@ -43,13 +45,13 @@ export function ChipsPage(): React.JSX.Element {
   const ws = MOCK_WORKSPACES.find((w) => w.chip === currentChip);
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="flex h-full w-full min-h-0 grow flex-row">
       {/* 左侧 chip 列表 */}
       <aside className="flex w-60 flex-shrink-0 flex-col overflow-y-auto border-border-default border-r bg-surface">
         <div className="border-border-default border-b px-4 py-3">
-          <h2 className="font-medium text-fg-primary text-sm">Chips</h2>
+          <h2 className="font-medium text-fg-primary text-sm">{t('gui.chips.title')}</h2>
           <p className="mt-0.5 text-fg-tertiary text-[11px]">
-            {MOCK_CHIPS.length} 个 · bb-server mock
+            {t('gui.chips.count', { count: MOCK_CHIPS.length })}
           </p>
         </div>
         <ul className="flex flex-col">
@@ -72,7 +74,7 @@ export function ChipsPage(): React.JSX.Element {
                     <span className="font-mono font-medium text-fg-primary text-xs">{chip}</span>
                     {ws && (
                       <span className="truncate text-fg-tertiary text-[10px]">
-                        {ws.designs.length} designs · {ws.cores.length} cores
+                        {t('gui.chips.designsCores', { designs: ws.designs.length, cores: ws.cores.length })}
                       </span>
                     )}
                   </div>
@@ -88,7 +90,7 @@ export function ChipsPage(): React.JSX.Element {
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         {!ws ? (
           <div className="flex flex-1 items-center justify-center text-fg-tertiary text-sm">
-            选一个 chip 看 config。
+            {t('gui.chips.pickOne')}
           </div>
         ) : (
           <ChipDetail ws={ws} />
@@ -99,6 +101,7 @@ export function ChipsPage(): React.JSX.Element {
 }
 
 function ChipDetail({ ws }: { ws: WorkspaceInfo }): React.JSX.Element {
+  const { t } = useTranslation();
   const tileFiles = ws.designs.flatMap((d) => [
     `${ws.root}/configs/${d.replace(/^designs\//, 'designs/')}`,
     // mock tiles:每个 design 假设有 1-2 个 tile
@@ -108,13 +111,13 @@ function ChipDetail({ ws }: { ws: WorkspaceInfo }): React.JSX.Element {
   ]);
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-6 py-6">
+    <div className="flex w-full min-w-0 grow flex-col items-stretch gap-6 self-stretch px-6 py-6">
       <header className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
           <Cpu className="size-[18px] text-accent" />
           <h1 className="font-mono font-semibold text-fg-primary text-xl">{ws.chip}</h1>
           <span className="rounded-full bg-elevated px-2 py-0.5 text-fg-tertiary text-[10px] uppercase">
-            production
+            {t('gui.chips.production')}
           </span>
         </div>
         <p className="font-mono text-fg-tertiary text-xs">{ws.root}</p>
@@ -123,8 +126,8 @@ function ChipDetail({ ws }: { ws: WorkspaceInfo }): React.JSX.Element {
       {/* chip.toml —— 入口,选 designs + sims */}
       <ConfigBlock
         icon={<FileCode2 className="size-[14px]" />}
-        title="chip.toml"
-        subtitle="Entry · selects designs + simulation configs"
+        title={t('gui.chips.chipToml.title')}
+        subtitle={t('gui.chips.chipToml.subtitle')}
         path={`${ws.root}/configs/chip.toml`}
         content={renderChipToml(ws)}
       />
@@ -132,8 +135,8 @@ function ChipDetail({ ws }: { ws: WorkspaceInfo }): React.JSX.Element {
       {/* designs/*.toml */}
       <ConfigBlock
         icon={<Layers className="size-[14px]" />}
-        title="designs/*.toml"
-        subtitle="Each declares a tile set"
+        title={t('gui.chips.designs.title')}
+        subtitle={t('gui.chips.designs.subtitle')}
         path={`${ws.root}/configs/designs/`}
         files={ws.designs.map((d) => `${ws.root}/configs/${d}`)}
       />
@@ -141,18 +144,16 @@ function ChipDetail({ ws }: { ws: WorkspaceInfo }): React.JSX.Element {
       {/* tiles/*.toml */}
       <ConfigBlock
         icon={<Layers className="size-[14px]" />}
-        title="designs/tiles/*.toml"
-        subtitle="Each declares sharedMem + cores"
+        title={t('gui.chips.tiles.title')}
+        subtitle={t('gui.chips.tiles.subtitle')}
         path={`${ws.root}/configs/designs/tiles/`}
         files={tileFiles}
       />
 
       {/* Scala targets —— 三个不可绕过的 target */}
       <section className="rounded-lg border border-border-default bg-surface p-4">
-        <h3 className="mb-3 font-medium text-fg-primary text-sm">Scala Targets</h3>
-        <p className="mb-3 text-fg-tertiary text-[11px]">
-          三个 target 都得改,缺一个就 build 不起来。chip-designer skill 强制要求。
-        </p>
+        <h3 className="mb-3 font-medium text-fg-primary text-sm">{t('gui.chips.scalaTargets')}</h3>
+        <p className="mb-3 text-fg-tertiary text-[11px]">{t('gui.chips.scalaTargetsNote')}</p>
         <ul className="flex flex-col gap-1.5 font-mono text-fg-secondary text-xs">
           <TargetRow path={`arch/src/main/scala/framework/system/core/seed/${ws.chip}/CustomConfigs.scala`} />
           <TargetRow path={`arch/src/main/scala/framework/system/sims/verilator/TargetConfigs.scala`} />
@@ -162,7 +163,7 @@ function ChipDetail({ ws }: { ws: WorkspaceInfo }): React.JSX.Element {
 
       {/* cores 被 chip 引用 */}
       <section className="rounded-lg border border-border-default bg-surface p-4">
-        <h3 className="mb-3 font-medium text-fg-primary text-sm">Cores</h3>
+        <h3 className="mb-3 font-medium text-fg-primary text-sm">{t('gui.chips.cores')}</h3>
         <div className="flex flex-wrap gap-2">
           {ws.cores.map((core) => (
             <span
@@ -178,12 +179,12 @@ function ChipDetail({ ws }: { ws: WorkspaceInfo }): React.JSX.Element {
       {/* TODO banner */}
       <section className="rounded-lg border border-border-default border-dashed bg-canvas p-4">
         <h3 className="mb-2 font-medium text-fg-secondary text-xs uppercase tracking-wide">
-          Next
+          {t('gui.chips.next')}
         </h3>
         <ul className="space-y-1 text-fg-tertiary text-xs">
-          <li>· 接 trpc 读真实 toml 内容 + smol-toml 解析(展示 topology 视图)</li>
-          <li>· 加 tile → core 引用图,可视化 inter-core SharedMem contract</li>
-          <li>· 每个 target 文件旁加 edit 按钮,跳到对应 git blob</li>
+          {t('gui.chips.nextItems', { returnObjects: true }).map((item: string, i: number) => (
+            <li key={i}>· {item}</li>
+          ))}
         </ul>
       </section>
     </div>
